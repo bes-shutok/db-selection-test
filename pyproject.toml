@@ -1,0 +1,36 @@
+[project]
+name = "crm-poc-postgresql"
+version = "0.1.0"
+description = "Standalone PostgreSQL POC for CRM JSONB and OLAP-ish workload validation"
+readme = "README.md"
+requires-python = "==3.14.2"
+dependencies = [
+  "psycopg[binary]==3.3.2",
+  "faker==40.4.0",
+  "numpy==2.4.2",
+  "python-dotenv==1.2.1",
+  "rich==14.3.2",
+]
+
+[project.scripts]
+poc-generate = "poc.generate_data:main"
+poc-load = "poc.load_data:main"
+poc-run = "poc.run_queries:main"
+poc-report = "poc.collect_report:main"
+
+[build-system]
+requires = ["hatchling==1.28.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/poc"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/poc",
+  "sql",
+  "scripts",
+  "README.md",
+  ".env.example",
+  "docker-compose.yml",
+]
