@@ -192,6 +192,7 @@ The testing process is automated to ensure reproducibility. Below is the step-by
     *   *Skew*: Uses weighted choices (e.g., 68% 'en', 12% 'fr') to mimic real demographics.
 4.  **Load**: `COPY` commands bulk load data into PostgreSQL.
 5.  **Analyze**: `ANALYZE` is run immediately to build initial statistics.
+Concrete setup/seeding SQL examples and historical row evidence are listed in Section 5.1.
 
 ### Phase 2: Baseline Execution
 We establish a performance baseline on the fresh, optimized database.
@@ -289,7 +290,7 @@ Finally, we query internal PostgreSQL statistics to quantify the damage.
 
 ```sql
 -- Profile Properties (JSONB-heavy, high update frequency)
-CREATE TABLE profile_properties (
+CREATE TABLE IF NOT EXISTS profile_properties (
   tenant_id VARCHAR(45) NOT NULL,
   profile_id VARCHAR(45) NOT NULL,
   custom_properties JSONB NOT NULL,
@@ -297,12 +298,84 @@ CREATE TABLE profile_properties (
   updated_at TIMESTAMPTZ NOT NULL,
   PRIMARY KEY (tenant_id, profile_id),
   FOREIGN KEY (tenant_id, profile_id) REFERENCES profiles(tenant_id, profile_id)
-) WITH (
-  fillfactor = 75,
-  autovacuum_vacuum_scale_factor = 0.02,
-  autovacuum_analyze_scale_factor = 0.01
-);
+) WITH (fillfactor = 75);
+
+ALTER TABLE profile_properties
+  SET (
+    autovacuum_vacuum_scale_factor = 0.02,
+    autovacuum_analyze_scale_factor = 0.01
+  );
 ```
+
+#### 5.1.1 Phase 1 Setup & Seeding SQL (Historical Run: `20260226_1608_w10`)
+
+Bulk load SQL pattern used by loader (`COPY ... FROM STDIN`):
+
+```sql
+COPY profiles (tenant_id, profile_id, status, country, language, created_at, updated_at)
+FROM STDIN WITH (FORMAT csv, HEADER true);
+
+COPY profile_properties (tenant_id, profile_id, custom_properties, properties_version, updated_at)
+FROM STDIN WITH (FORMAT csv, HEADER true);
+
+COPY consent (tenant_id, profile_id, channel, purpose, state, updated_at, source)
+FROM STDIN WITH (FORMAT csv, HEADER true);
+
+COPY message_events (tenant_id, profile_id, campaign_id, channel, event_type, event_time, attributes)
+FROM STDIN WITH (FORMAT csv, HEADER true);
+```
+
+Real CSV rows used by the `COPY` load in run `20260226_1608_w10`:
+These are excerpts only (not full files): the run generated `100000` `profiles`, `100000` `profile_properties`, `900000` `consent`, and `5000000` `message_events` rows before static seed inserts.
+
+`profiles.csv`
+```csv
+tenant_id,profile_id,status,country,language,created_at,updated_at
+260217000000ups00000001,260226113105prf000000001,ACTIVE,NG,en,2025-05-16T11:06:32.940573+00:00,2025-06-11T11:06:32.940573+00:00
+260217000000ups00000001,260226113105prf000000002,ACTIVE,NG,en,2026-02-14T21:47:17.940591+00:00,2026-03-09T21:47:17.940591+00:00
+```
+
+`profile_properties.csv`
+```csv
+tenant_id,profile_id,custom_properties,properties_version,updated_at
+260217000000ups00000001,260226113105prf000000001,"{""plan"":""pro"",""vip"":false,""vip_level"":""bronze"",""segment"":""retention_push"",""deposit"":{""bucket"":""mid"",""last_at"":""2026-01-11T19:18:49.448319+00:00""},""risk_band"":""low"",""tags"":[""reactivation"",""casino"",""sportsbook""],""last_bet_at"":""2026-01-19T04:29:54.448342+00:00""}",4,2026-02-26T11:31:06.448364+00:00
+```
+
+`consent.csv`
+```csv
+tenant_id,profile_id,channel,purpose,state,updated_at,source
+260217000000ups00000001,260226113105prf000000001,email,marketing,opted_in,2026-01-24T23:01:24.393564+00:00,import
+260217000000ups00000001,260226113105prf000000001,email,transactional,opted_in,2025-11-12T18:47:31.393573+00:00,admin
+```
+
+`message_events.csv`
+```csv
+tenant_id,profile_id,campaign_id,channel,event_type,event_time,attributes
+260217000000ups00000001,260226113105prf000008926,260226113109cmp000000154,sms,delivered,2026-02-06T18:44:00.770815+00:00,"{""provider"":""sparkpost"",""template_id"":""tmpl_160"",""delivery_bucket"":""normal"",""region"":""af""}"
+260217000000ups00000001,260226113106prf000077396,260226113109cmp000000003,push,sent,2025-11-05T06:23:09.770848+00:00,"{""provider"":""sparkpost"",""template_id"":""tmpl_152"",""delivery_bucket"":""normal"",""region"":""af""}"
+```
+
+Static seed SQL applied after bulk load:
+
+```sql
+INSERT INTO profiles (tenant_id, profile_id, status, country, language, created_at, updated_at)
+VALUES
+  ('260217000000ups00000001', '260218120000000100000001', 'ACTIVE', 'NG', 'en', now() - interval '15 days', now()),
+  ('260217000000ups00000001', '260218120000000100000002', 'ACTIVE', 'KE', 'en', now() - interval '13 days', now()),
+  ('260217000000ups00000001', '260218120000000100000003', 'DELETED', 'GH', 'en', now() - interval '10 days', now())
+ON CONFLICT DO NOTHING;
+```
+
+Historical volume evidence for this run:
+
+| Table | CSV lines (`wc -l`) | Generated rows (minus header) | Static seed rows | Expected rows after Phase 1 |
+| :--- | ---: | ---: | ---: | ---: |
+| `profiles` | 100001 | 100000 | 3 | 100003 |
+| `profile_properties` | 100001 | 100000 | 3 | 100003 |
+| `consent` | 900001 | 900000 | 3 | 900003 |
+| `message_events` | 5000001 | 5000000 | 3 | 5000003 |
+
+The same run's pre-bloat metrics snapshot reports `n_live_tup` of `100003` (profiles), `100003` (profile_properties), `900003` (consent), and `5000220` (message_events). For `message_events`, `n_live_tup` comes from PostgreSQL statistics and can be approximate on large tables.
 
 ### 5.2 Core Read Queries
 

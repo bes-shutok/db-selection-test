@@ -223,6 +223,14 @@ Rules for consistency in this repository only.
    - Do not mark content as company-sensitive solely because it is recommendation narrative; require concrete non-public details (for example named people, internal codes, credentials, explicit rollout commitments, or private infrastructure specifics).
    - When flagging sensitivity, cite the exact lines that make it sensitive.
 
+28. **Keep workflow narrative separate from executable SQL examples**
+   - In algorithm/runbook docs, keep phase sections focused on step flow and place concrete DDL/COPY/seed examples under the SQL reference section.
+   - If a phase needs those examples for clarity, add a short cross-reference instead of duplicating SQL blocks in the phase narrative.
+
+29. **Label sampled load data as excerpts with full-scale context**
+   - When showing example CSV rows from generated datasets, explicitly state that rows are excerpts and include the total generated row counts for each shown table.
+   - When relevant, distinguish generated row counts from additional static seed rows so readers can reconcile final table cardinality.
+
 ### Section 3: Repository Constraints
 Hard boundaries for this repository.
 
