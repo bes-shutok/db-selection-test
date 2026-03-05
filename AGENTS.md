@@ -259,6 +259,10 @@ Rules for consistency in this repository only.
    - Treat duplicate `-- name:` labels in a single SQL file as configuration errors (raise an explicit error).
    - When merging core/complex query dictionaries, reject overlapping names instead of allowing silent overwrite precedence.
 
+37. **Separate remote access-path effects from managed-DB capacity claims**
+   - When summarizing remote benchmark results, explicitly label whether runners were co-located with the DB or remote (for example cross-region + VPN worst-case path).
+   - Do not attribute large latency gaps to the cloud provider alone unless runner placement and DB topology are comparable; include instance class, writer/reader count, and AZ mode in the evidence.
+
 ### Section 3: Repository Constraints
 Hard boundaries for this repository.
 

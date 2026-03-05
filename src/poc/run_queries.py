@@ -533,7 +533,8 @@ def load_worker(
         iteration = 0
 
         conn = connect(settings, autocommit=False)
-        reconnect_attempts_left = 1
+        reconnect_budget = 1
+        reconnect_attempts_left = reconnect_budget
         try:
             cur = conn.cursor()
             while time.monotonic() < stop_at:
@@ -551,6 +552,7 @@ def load_worker(
                 status = "ok"
                 error_code = ""
                 error_message = ""
+                stop_worker = False
 
                 try:
                     result_rows, status, error_code = execute_load_once(
@@ -570,6 +572,8 @@ def load_worker(
                             "(0 rows affected after retry)"
                         )
                     conn.commit()
+                    reconnect_attempts_left = reconnect_budget
+                    elapsed_ms = (time.perf_counter() - started) * 1000
                 except Exception as exc:
                     try:
                         conn.rollback()
@@ -578,18 +582,20 @@ def load_worker(
                     status = "error"
                     error_code = getattr(exc, "sqlstate", "") or type(exc).__name__
                     error_message = format_exception_message(exc)
+                    elapsed_ms = (time.perf_counter() - started) * 1000
 
                     sqlstate = getattr(exc, "sqlstate", "") or ""
-                    if sqlstate.startswith("08") and reconnect_attempts_left > 0:
-                        reconnect_attempts_left -= 1
-                        try:
-                            conn.close()
-                        except Exception:
-                            pass
-                        conn = connect(settings, autocommit=False)
-                        cur = conn.cursor()
-
-                elapsed_ms = (time.perf_counter() - started) * 1000
+                    if sqlstate.startswith("08"):
+                        if reconnect_attempts_left <= 0:
+                            stop_worker = True
+                        else:
+                            reconnect_attempts_left -= 1
+                            try:
+                                conn.close()
+                            except Exception:
+                                pass
+                            conn = connect(settings, autocommit=False)
+                            cur = conn.cursor()
                 if record_row:
                     row = {
                         "phase": phase,
@@ -605,6 +611,8 @@ def load_worker(
                     }
                     with rows_lock:
                         rows.append(row)
+                if stop_worker:
+                    break
         finally:
             try:
                 conn.close()
@@ -620,7 +628,8 @@ def write_load_outputs(
     phase: str,
     rows: list[dict[str, object]],
     queries: dict[str, str],
-    phase_elapsed_seconds: float,
+    qps_window_seconds: float,
+    actual_elapsed_seconds: float,
 ) -> None:
     suffix = phase_suffix(phase)
     executions_path = settings.results_dir / f"load_executions{suffix}.csv"
@@ -644,7 +653,8 @@ def write_load_outputs(
         else:
             errors_by_query[query_name] += 1
 
-    duration = max(phase_elapsed_seconds, 0.001)
+    duration = max(qps_window_seconds, 0.001)
+    actual_duration = max(actual_elapsed_seconds, 0.001)
 
     with summary_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
@@ -701,6 +711,7 @@ def write_load_outputs(
                 "workers",
                 "warmup_seconds",
                 "duration_seconds",
+                "actual_elapsed_seconds",
                 "total_calls",
                 "total_errors",
                 "overall_qps",
@@ -712,6 +723,7 @@ def write_load_outputs(
                 settings.load_workers,
                 settings.load_warmup_seconds,
                 round(duration, 3),
+                round(actual_duration, 3),
                 total_calls,
                 total_errors,
                 round(total_calls / duration, 3),
@@ -778,8 +790,16 @@ def run_load(
     if worker_errors:
         raise RuntimeError("; ".join(worker_errors))
 
-    phase_elapsed_seconds = max(0.001, time.monotonic() - warmup_until)
-    write_load_outputs(settings, phase, rows, queries, phase_elapsed_seconds)
+    actual_elapsed_seconds = max(0.001, time.monotonic() - warmup_until)
+    qps_window_seconds = max(float(settings.load_duration_seconds), 0.001)
+    write_load_outputs(
+        settings,
+        phase,
+        rows,
+        queries,
+        qps_window_seconds,
+        actual_elapsed_seconds,
+    )
 
     if settings.load_capture_pg_stat_statements:
         capture_ok, capture_msg = capture_pg_stat_statements(settings, phase)
