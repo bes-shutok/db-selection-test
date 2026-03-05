@@ -188,6 +188,9 @@ Use DBA-provided environment for:
 - infra-aware resource observations
 - final performance interpretation
 - the same query profiles and artifact schemas as local mode, driven by environment variables
+- optional session bootstrap controls for role/schema alignment with DBA permissions:
+  - `DB_SESSION_ROLE` -> `SET ROLE "<role>"`
+  - `DB_SCHEMA` -> `SET search_path TO "<schema>", public`
 
 ### 8.3 Query Catalog Selection
 Query files can be selected per run without changing script logic:

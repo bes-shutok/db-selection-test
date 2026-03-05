@@ -17,6 +17,8 @@ export DB_PORT="${DB_PORT:-5432}"
 export DB_NAME="${DB_NAME:-ups_poc}"
 export DB_USER="${DB_USER:-ups_user}"
 export DB_PASSWORD="${DB_PASSWORD:-ups_pass}"
+export DB_SCHEMA="${DB_SCHEMA:-}"
+export DB_SESSION_ROLE="${DB_SESSION_ROLE:-}"
 export RUN_ID="${RUN_ID:-$(date -u +%Y%m%d_%H%M%S)}"
 export QUERY_RUN_PROFILE="${QUERY_RUN_PROFILE:-both}"
 
@@ -27,19 +29,54 @@ run_sql_file() {
   local sql_file_abs="$ROOT_DIR/$sql_file_rel"
 
   if command -v psql >/dev/null 2>&1; then
-    psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$sql_file_abs"
+    {
+      emit_session_bootstrap_sql
+      cat "$sql_file_abs"
+    } | psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -f -
     return
   fi
 
   if command -v docker >/dev/null 2>&1 && docker compose ps --services --status running | grep -q "^postgres$"; then
-    docker compose exec -T -e PGPASSWORD="$DB_PASSWORD" postgres \
-      psql -h localhost -p 5432 -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 < "$sql_file_abs"
+    {
+      emit_session_bootstrap_sql
+      cat "$sql_file_abs"
+    } | docker compose exec -T -e PGPASSWORD="$DB_PASSWORD" postgres \
+      psql -h localhost -p 5432 -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -f -
     return
   fi
 
   echo "ERROR: psql is not installed and local postgres container is not running." >&2
   echo "Install psql, or run 'docker compose up -d' and retry." >&2
   exit 1
+}
+
+sql_ident() {
+  local ident="$1"
+  ident="${ident//\"/\"\"}"
+  printf '"%s"' "$ident"
+}
+
+emit_session_bootstrap_sql() {
+  local should_emit=0
+  if [[ -n "${DB_SESSION_ROLE:-}" || -n "${DB_SCHEMA:-}" ]]; then
+    should_emit=1
+  fi
+
+  if [[ "$should_emit" -eq 0 ]]; then
+    return
+  fi
+
+  printf '\\set QUIET on\n'
+
+  if [[ -n "${DB_SESSION_ROLE:-}" ]]; then
+    printf 'SET ROLE %s;\n' "$(sql_ident "$DB_SESSION_ROLE")"
+  fi
+
+  if [[ -n "${DB_SCHEMA:-}" ]]; then
+    printf 'SET search_path TO %s, public;\n' "$(sql_ident "$DB_SCHEMA")"
+  fi
+
+  printf '\\set QUIET off\n'
 }
 
 echo "Cleaning up previous run (dropping tables)..."

@@ -15,6 +15,8 @@ class Settings:
     db_name: str
     db_user: str
     db_password: str
+    db_schema: str | None
+    db_session_role: str | None
     data_scale: str
     profile_count: int
     event_count: int
@@ -93,6 +95,16 @@ def _resolve_sql_path(root: Path, env_name: str, default_rel: str) -> Path:
     return resolved
 
 
+def _optional_env(env_name: str) -> str | None:
+    raw = os.getenv(env_name)
+    if raw is None:
+        return None
+    value = raw.strip()
+    if not value:
+        return None
+    return value
+
+
 def load_settings() -> Settings:
     load_dotenv()
 
@@ -131,6 +143,8 @@ def load_settings() -> Settings:
         db_name=os.getenv("DB_NAME", "ups_poc"),
         db_user=os.getenv("DB_USER", "ups_user"),
         db_password=os.getenv("DB_PASSWORD", "ups_pass"),
+        db_schema=_optional_env("DB_SCHEMA"),
+        db_session_role=_optional_env("DB_SESSION_ROLE"),
         data_scale=scale,
         profile_count=int(os.getenv("PROFILE_COUNT", str(default_profiles))),
         event_count=int(os.getenv("EVENT_COUNT", str(default_events))),

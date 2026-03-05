@@ -21,6 +21,9 @@ Both scripts run the same logical sequence:
 1. Environment variables
 - `run_local.sh` provides defaults for DB connection values.
 - `run_on_dba_env.sh` requires `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD`.
+- Both scripts accept optional session controls:
+  - `DB_SCHEMA`: applies `SET search_path TO "<schema>", public` before SQL/workload execution.
+  - `DB_SESSION_ROLE`: applies `SET ROLE "<role>"` before SQL/workload execution.
 - Both scripts default `QUERY_RUN_PROFILE=both` unless explicitly overridden.
 - Both scripts support optional query catalog overrides:
   - `SQL_CORE_FILE` (default: `sql/004_queries_core.sql`)
@@ -30,6 +33,7 @@ Both scripts run the same logical sequence:
 2. SQL client behavior
 - `run_local.sh` uses local `psql` when available, otherwise falls back to `docker compose exec ... psql` if local postgres container is running.
 - `run_on_dba_env.sh` requires local `psql` and has no Docker fallback.
+- In both scripts, SQL files are executed with optional session bootstrap statements (`SET ROLE`, `SET search_path`) when the corresponding env vars are set.
 
 3. Where `psql` runs
 - In DBA mode, `psql` runs on the machine invoking `./scripts/run_on_dba_env.sh`.

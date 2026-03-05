@@ -17,6 +17,8 @@ fi
 : "${DB_NAME:?DB_NAME is required}"
 : "${DB_USER:?DB_USER is required}"
 : "${DB_PASSWORD:?DB_PASSWORD is required}"
+export DB_SCHEMA="${DB_SCHEMA:-}"
+export DB_SESSION_ROLE="${DB_SESSION_ROLE:-}"
 export RUN_ID="${RUN_ID:-$(date -u +%Y%m%d_%H%M%S)}"
 export QUERY_RUN_PROFILE="${QUERY_RUN_PROFILE:-both}"
 
@@ -32,7 +34,39 @@ export PGPASSWORD="$DB_PASSWORD"
 run_sql_file() {
   local sql_file_rel="$1"
   local sql_file_abs="$ROOT_DIR/$sql_file_rel"
-  "${PSQL_CMD[@]}" -f "$sql_file_abs"
+  {
+    emit_session_bootstrap_sql
+    cat "$sql_file_abs"
+  } | "${PSQL_CMD[@]}" -f -
+}
+
+sql_ident() {
+  local ident="$1"
+  ident="${ident//\"/\"\"}"
+  printf '"%s"' "$ident"
+}
+
+emit_session_bootstrap_sql() {
+  local should_emit=0
+  if [[ -n "${DB_SESSION_ROLE:-}" || -n "${DB_SCHEMA:-}" ]]; then
+    should_emit=1
+  fi
+
+  if [[ "$should_emit" -eq 0 ]]; then
+    return
+  fi
+
+  printf '\\set QUIET on\n'
+
+  if [[ -n "${DB_SESSION_ROLE:-}" ]]; then
+    printf 'SET ROLE %s;\n' "$(sql_ident "$DB_SESSION_ROLE")"
+  fi
+
+  if [[ -n "${DB_SCHEMA:-}" ]]; then
+    printf 'SET search_path TO %s, public;\n' "$(sql_ident "$DB_SCHEMA")"
+  fi
+
+  printf '\\set QUIET off\n'
 }
 
 echo "Cleaning up previous run (dropping tables) on DBA environment..."

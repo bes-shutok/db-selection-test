@@ -66,11 +66,24 @@ docker compose up -d
 ```
 
 ## Run on DBA Infrastructure
-1. Set `.env` with DBA connection values.
+1. Set `.env` with DBA connection values (and optional session role/schema controls):
+```bash
+DB_HOST=your-db-host.region.rds.amazonaws.com
+DB_PORT=5432
+DB_NAME=your_db_name
+DB_USER=your_db_user
+DB_PASSWORD=your_password
+DB_SCHEMA=your_schema_name
+DB_SESSION_ROLE=your_role_name
+```
 2. Execute:
 ```bash
 ./scripts/run_on_dba_env.sh
 ```
+
+Notes:
+- `DB_SCHEMA` is optional; when set, scripts and Python runners execute with `SET search_path TO "<schema>", public`.
+- `DB_SESSION_ROLE` is optional; when set, scripts and Python runners execute with `SET ROLE "<role>"` for object ownership/permissions.
 
 ## Query Run Profiles
 - `QUERY_RUN_PROFILE=iterations`: deterministic single-connection latency sampling (`timings*.csv`).
