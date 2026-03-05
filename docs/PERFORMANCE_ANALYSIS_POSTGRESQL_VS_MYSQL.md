@@ -20,6 +20,15 @@ TL;DR Verdict:
 Primary baseline for this document:
 - PostgreSQL `16.8` measured local matrix (`20260226_1608_w03b`, `20260226_1608_w10b`, `20260226_1608_w50`)
 - PostgreSQL `18.2` kept as side-by-side comparison context
+- AWS RDS measured comparison (`20260305_155121` -> `20260305_161908`):
+  - remote access through VPN introduced substantial end-to-end delay; this is a worst-case client-path scenario (cross-region distance + VPN), not a production-like co-located benchmark
+  - throughput scaled from `15.144` to `24.764` avg QPS (`3` -> `10` workers), but per-worker efficiency dropped (`5.048` -> `2.476` QPS/worker), showing early saturation in this end-to-end test path (client location + VPN + database resources)
+  - latency detail at 10 workers (pre-bloat, local vs AWS):
+    - `core_profile_lookup` p95: `1.650 ms` vs `145.328 ms` (about `88x` higher in this remote VPN setup)
+    - `core_consent_lookup` p95: `1.579 ms` vs `147.326 ms` (about `93x` higher in this remote VPN setup)
+    - `complex_join_filter` p95: `1837.345 ms` vs `7289.919 ms` (about `4.0x` higher in this remote VPN setup)
+    - `complex_event_rollup` p95: `3067.337 ms` vs `21859.295 ms` (about `7.1x` higher in this remote VPN setup)
+  - compared with the local MacBook Pro M4 Docker runs, this remote-over-VPN setup delivered materially lower throughput and higher p95 latency for this workload intensity; this should not be interpreted as an AWS-intrinsic limit
 
 ---
 
@@ -41,22 +50,25 @@ Primary baseline for this document:
   - `results/20260226_1608_w10b/db_version.txt`
   - `results/20260226_1608_w50/db_version.txt`
 
-### PostgreSQL 16.8 AWS RDS Run (Measured Sanity Slice)
-- Remote AWS RDS run:
+### PostgreSQL 16.8 AWS RDS Runs (Measured Slices)
+- Remote AWS RDS runs:
   - `20260305_155121`: 3 workers, `load` profile, schema `crm`, session role `crm.readwrite`
+  - `20260305_161908`: 10 workers, `load` profile, schema `crm`, session role `crm.readwrite`
 - Scale: Baseline (`100k profiles`, `5M events`)
 - Environment: AWS RDS PostgreSQL 16.8 server (remote over VPN)
-- Measured phase totals:
+- Measured phase totals (`20260305_155121`, 3 workers):
   - pre-bloat: duration `91.812s`, calls `1438`, errors `0`, qps `15.662`
   - post-bloat: duration `90.729s`, calls `1327`, errors `0`, qps `14.626`
+- Measured phase totals (`20260305_161908`, 10 workers):
+  - pre-bloat: duration `94.457s`, calls `2276`, errors `0`, qps `24.096`
+  - post-bloat: duration `94.719s`, calls `2409`, errors `0`, qps `25.433`
 - Artifacts:
   - `results/20260305_155121/summary.md`
+  - `results/20260305_161908/summary.md`
   - `results/20260305_155121/load_phase_summary_pre_bloat.csv`
   - `results/20260305_155121/load_phase_summary_post_bloat.csv`
-  - `results/20260305_155121/load_summary_pre_bloat.csv`
-  - `results/20260305_155121/load_summary_post_bloat.csv`
-  - `results/20260305_155121/bloat_metrics_pre.txt`
-  - `results/20260305_155121/bloat_metrics_post.txt`
+  - `results/20260305_161908/load_phase_summary_pre_bloat.csv`
+  - `results/20260305_161908/load_phase_summary_post_bloat.csv`
 
 ### PostgreSQL 18.2 Results (Secondary Comparison Context)
 - Comparison matrix runs:
@@ -118,7 +130,7 @@ Using the definitions from **Core Concepts**:
 > 
 > **For Authoritative Comparison**:
 > 1. **Run identical MySQL 8.4 POC** - same hardware, same Docker environment, same queries
-> 2. **Test both on AWS RDS environment** - production-like hardware, eliminate environment variance
+> 2. **Test both on AWS RDS with co-located runners** - production-like hardware and minimized client-path variance
 > 3. **Compare under load** - concurrent queries, connection pooling, multi-tenant simulation
 > 
 > See [References](#references) section for detailed source citations and methodology.
@@ -466,7 +478,7 @@ Observed trend:
 - 10 -> 50 workers: throughput plateau (`171.117` to `162.702` QPS, about `-4.9%`) under much higher concurrency.
 - Like 18.2, high worker counts are contention-dominated in local Docker conditions.
 
-### 5.1 PostgreSQL 16.8 Local vs AWS RDS (Measured 3-Worker Slice)
+### 5.1 PostgreSQL 16.8 Local vs AWS RDS (Measured 3-Worker Run)
 
 Purpose:
 - Compare the same worker level (`3`) and load profile across local baseline and AWS RDS server environment.
@@ -491,7 +503,44 @@ Derived comparison:
 Interpretation:
 - The AWS RDS run confirms end-to-end replay viability (permissions, role usage, extension visibility, pre/post artifact generation).
 - Local and AWS RDS runs are comparable for workload-shape and directionality checks.
-- Absolute latency/qps values are not interchangeable between these environments.
+- Absolute latency/qps values are not interchangeable between these environments because this replay used a remote client path (cross-region distance + VPN), not co-located runners.
+
+### 5.2 PostgreSQL 16.8 AWS RDS Comparison (3 -> 10 Workers)
+
+Purpose:
+- Compare measured remote AWS replay behavior from `3` workers to `10` workers for the same workload profile.
+
+Runs compared:
+- `20260305_155121` (3 workers)
+- `20260305_161908` (10 workers)
+
+Raw phase totals:
+
+| run_id | workers | pre duration (s) | pre calls | pre errors | pre qps | post duration (s) | post calls | post errors | post qps |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `20260305_155121` | 3 | 91.812 | 1438 | 0 | 15.662 | 90.729 | 1327 | 0 | 14.626 |
+| `20260305_161908` | 10 | 94.457 | 2276 | 0 | 24.096 | 94.719 | 2409 | 0 | 25.433 |
+
+Derived comparison:
+- Average qps (`(pre + post) / 2`): `15.144` -> `24.764` (`+63.5%`).
+- QPS per worker (`avg_qps / workers`): `5.048` -> `2.476` (`-51.0%` efficiency per worker).
+- Post-vs-pre phase direction:
+  - 3-worker run: `-6.6%` post-bloat qps change.
+  - 10-worker run: `+5.6%` post-bloat qps change.
+
+Selected pre-bloat p95 behavior (3 vs 10 workers):
+
+| Query | p95 at 3 workers | p95 at 10 workers | delta |
+|---|---:|---:|---:|
+| `core_profile_lookup` | 143.256 ms | 145.328 ms | +1.4% |
+| `core_consent_lookup` | 142.724 ms | 147.326 ms | +3.2% |
+| `complex_join_filter` | 1730.575 ms | 7289.919 ms | +321.3% |
+| `complex_event_rollup` | 3618.004 ms | 21859.295 ms | +504.1% |
+
+Interpretation:
+- Throughput increases from `3` to `10` workers in the remote AWS test, but not linearly.
+- Heavy analytical queries dominate tail-latency growth, while core lookup p95 remains near the remote network/round-trip floor.
+- Treat these remote latency levels as worst-case for this access pattern; co-located runner results are expected to be materially lower.
 
 ### 6. PostgreSQL 16.8 vs PostgreSQL 18.2 (Local Matrix)
 
@@ -720,7 +769,7 @@ Cross-version compact summary:
 ## PostgreSQL 16.8 Decision Tradeoffs (Performance)
 
 Upside of standardizing on 16.8:
-1. Matches planned production-like AWS RDS validation baseline; workload shape is directly comparable between local and infra, while absolute throughput/latency must be interpreted per environment.
+1. Matches planned AWS RDS validation baseline for workload shape; note that current remote replay is worst-case due to cross-region + VPN path and is not a production-like latency benchmark.
 2. Very strong measured performance already on this workload shape (sub-2ms key lookups, sub-1ms writes in iteration mode, strong JSONB and complex-read behavior).
 3. Reduces interpretation noise from cross-major planner/runtime differences during current decision phase.
 
@@ -732,7 +781,7 @@ Downside or what we may miss vs staying on newer major releases:
 Practical implication for this POC:
 1. Choosing 16.8 is performance-safe for this CRM workload based on current measured evidence.
 2. Keep 18.x comparison tables as directional optimization headroom, not as the production acceptance baseline.
-3. Re-run a focused A/B slice on AWS RDS hardware later if upgrade ROI to newer major becomes a priority.
+3. Re-run a focused A/B test on AWS RDS hardware later with co-located runners if upgrade ROI to newer major becomes a priority.
 
 ---
 
@@ -787,7 +836,8 @@ Practical implication for this POC:
 
 **⚠️ Important Caveat**: 
 - PostgreSQL results are from **local Docker** (baseline validation)
-- For production decision, **must test on AWS RDS environment** (production-like hardware)
+- Current remote AWS replay (`20260305_155121`, `20260305_161908`) is a **worst-case path test** (cross-region + VPN), not a production-like latency baseline
+- For production decision, **must test on AWS RDS with co-located runners** (production-like hardware and minimized network-path bias)
 - Consider running **MySQL 8.4 POC** on same local environment for true apples-to-apples comparison
 
 ---
@@ -862,9 +912,9 @@ Practical implication for this POC:
 ### Next Steps:
 1. ✅ **Run stretch scale** (`500k profiles`, `20M events`) - validates scaling characteristics (same local environment)
 2. ✅ **Bloat impact testing** - **COMPLETE**: Pre/post bloat measurements show excellent autovacuum effectiveness
-3. ✅ **AWS RDS environment testing** - **CRITICAL** for production decision (production-like hardware eliminates environment variance)
-   - Initial PostgreSQL 16.8 remote replay complete (`20260305_155121`, 3 workers, pre/post bloat artifacts).
-   - Remaining: higher-intensity matrix on AWS RDS and same-environment MySQL run for final apples-to-apples decision.
+3. ✅ **AWS RDS environment testing** - **CRITICAL** for production decision (current replay is worst-case due to cross-region + VPN client path)
+   - PostgreSQL 16.8 remote replays complete for `3` and `10` workers (`20260305_155121`, `20260305_161908`) with pre/post bloat artifacts.
+   - Remaining: add `50`-worker/stress-level runs on AWS RDS with co-located runners and run same-environment MySQL for final apples-to-apples decision.
 4. ⚠️ **MySQL 8.4 POC** (recommended): Run same workload on MySQL 8.4 in **identical local Docker environment** for true apples-to-apples comparison
 5. ⚠️ **Concurrent load stress testing**: High-concurrency local load profile (50 workers, low conflict rate, zero exception failures) is complete; next step is dedicated-server higher intensity (100+ connections, multi-tenant simulation) with larger memory/shared-memory headroom
 6. ✅ **Production pilot**: Start with low-risk service (e.g., Analytics Service read-only queries) after AWS RDS environment validation
@@ -880,11 +930,13 @@ Practical implication for this POC:
   - Document hardware/config (same laptop, same Docker settings)
   - **Benefit**: Eliminates all environment variables, pure database comparison
 
-**Phase 2: AWS RDS Environment Testing (Production-like)**
-- ✅ Initial PostgreSQL 16.8 replay complete on AWS RDS (`20260305_155121`, 3 workers)
-- Expand PostgreSQL 16.8 matrix on AWS RDS (`10`, `50`, and stress tier)
+**Phase 2: AWS RDS Environment Testing (Worst-case remote first, then production-like)**
+- ✅ PostgreSQL 16.8 replay complete on AWS RDS for `3` and `10` workers (`20260305_155121`, `20260305_161908`)
+  - These completed runs are remote-over-VPN and should be interpreted as worst-case client-path measurements.
+- Expand PostgreSQL 16.8 matrix on AWS RDS (`50` and stress tier)
 - Run MySQL 8.4 on AWS RDS (if Phase 1 shows promise)
 - Same hardware for both (e.g., AWS RDS r6g.4xlarge)
+- Use co-located runners in the same region/AZ as the DB to remove physical-distance + VPN bias from latency comparisons
 - Same scale (baseline → stretch → stress)
 - Measure CPU, memory, I/O, network latency
 - **Benefit**: Production-representative results
@@ -908,7 +960,7 @@ Practical implication for this POC:
 ### Run Summary (Primary Baseline + Comparison Levels)
 - **Primary run ID**: `20260226_1608_w50` (latest with bloat + load testing, 50 workers)
 - **Comparison run IDs**: `20260226_1608_w10b` (10 workers), `20260226_1608_w03b` (3 workers)
-- **AWS RDS replay run ID**: `20260305_155121` (3 workers, load profile, schema `crm`)
+- **AWS RDS replay run IDs**: `20260305_155121` (3 workers), `20260305_161908` (10 workers), load profile with schema `crm`
 - **Scale**: Baseline (`100k profiles`, `900k consent rows`, `5M events`)
 - **Duration**: ~8 minutes (includes warmup + measured load phases for pre/post bloat)
 - **Artifacts**:
@@ -916,6 +968,7 @@ Practical implication for this POC:
   - `results/20260226_1608_w10b/`
   - `results/20260226_1608_w03b/`
   - `results/20260305_155121/`
+  - `results/20260305_161908/`
 
 **✅ Bloat Testing Complete**: 
 - Pre-bloat query measurements: ✅
@@ -993,11 +1046,11 @@ complex_join_filter:        p50=1277.866ms p95=1348.447ms p99=1378.660ms (10 ite
 
 ### Data Sources and Methodology
 
-**PostgreSQL 16.8 Results (Primary)**: Direct measurements from this POC (`run_id`: `20260226_1608_w03b`, `20260226_1608_w10b`, `20260226_1608_w50`, `20260305_155121`)
+**PostgreSQL 16.8 Results (Primary)**: Direct measurements from this POC (`run_id`: `20260226_1608_w03b`, `20260226_1608_w10b`, `20260226_1608_w50`, `20260305_155121`, `20260305_161908`)
 - Hardware: Local Docker environment
 - Configuration: POC local tuning (`shared_buffers=512MB`, `work_mem=16MB`, `jit=off`)
 - Measurements: 10 iterations per query, p50/p95/p99 calculated
-- Artifacts: Available in `results/20260226_1608_w03b/`, `results/20260226_1608_w10b/`, `results/20260226_1608_w50/`, `results/20260305_155121/`
+- Artifacts: Available in `results/20260226_1608_w03b/`, `results/20260226_1608_w10b/`, `results/20260226_1608_w50/`, `results/20260305_155121/`, `results/20260305_161908/`
 
 **PostgreSQL 18.2 Results (Secondary Context)**: Side-by-side comparison runs in Section 6 (`20260219_173511`, `20260219_210347`, `20260220_081004`)
 
@@ -1028,7 +1081,7 @@ complex_join_filter:        p50=1277.866ms p95=1348.447ms p99=1378.660ms (10 ite
 
 To validate these comparisons, we recommend:
 1. **Run MySQL 8.4 POC** with identical schema/queries (optional, if direct comparison needed)
-2. **AWS RDS environment testing** for both databases on production-like hardware
+2. **AWS RDS environment testing** for both databases with co-located runners (production-like); treat remote-over-VPN tests as worst-case access-path checks
 3. **Monitor actual production metrics** during pilot deployments
 
 ### Known Validation in Current PostgreSQL Testing
@@ -1121,6 +1174,7 @@ The latest POC run includes comprehensive bloat testing that validates PostgreSQ
      - `results/20260226_1608_w10b/` (16.8, 10 workers)
      - `results/20260226_1608_w50/` (16.8, 50 workers)
      - `results/20260305_155121/` (16.8, AWS RDS server, 3 workers)
+     - `results/20260305_161908/` (16.8, AWS RDS server, 10 workers)
      - `results/20260219_173511/` (3 workers)
      - `results/20260219_210347/` (10 workers)
      - `results/20260220_081004/` (50 workers)
@@ -1128,7 +1182,7 @@ The latest POC run includes comprehensive bloat testing that validates PostgreSQ
      - 2026-02-19 (`20260219_173511`, `20260219_210347`)
      - 2026-02-20 (`20260220_081004`)
      - 2026-02-26 (`20260226_1608_w03b`, `20260226_1608_w10b`, `20260226_1608_w50`)
-     - 2026-03-05 (`20260305_155121`)
+     - 2026-03-05 (`20260305_155121`, `20260305_161908`)
    - Dataset: 100k profiles, 5M events (baseline scale)
    - Includes both iteration and load artifacts (`timings_*`, `load_*`, `pg_stat_statements_*`)
    - Load phase summaries used in the 3/10/50 worker comparison:
@@ -1150,6 +1204,12 @@ The latest POC run includes comprehensive bloat testing that validates PostgreSQ
      - `results/20260305_155121/load_summary_pre_bloat.csv`
      - `results/20260305_155121/load_summary_post_bloat.csv`
      - `results/20260305_155121/summary.md`
+   - AWS-RDS 3-vs-10 worker comparison sources:
+     - `results/20260305_161908/load_phase_summary_pre_bloat.csv`
+     - `results/20260305_161908/load_phase_summary_post_bloat.csv`
+     - `results/20260305_161908/load_summary_pre_bloat.csv`
+     - `results/20260305_161908/load_summary_post_bloat.csv`
+     - `results/20260305_161908/summary.md`
    - Per-query pre-bloat p99 sources used in heavy-query trend:
      - `results/20260226_1608_w03b/load_summary_pre_bloat.csv`
      - `results/20260226_1608_w10b/load_summary_pre_bloat.csv`
@@ -1199,8 +1259,8 @@ For MySQL documentation, we relied on:
 ## Document Metadata
 - **Author**: OpenCode AI Assistant
 - **Date**: 2026-03-05
-- **Version**: 2.10 (Added measured PostgreSQL 16.8 AWS RDS slice and local-vs-AWS-RDS evidence; kept environment-qualified interpretation)
-- **Status**: ✅ **Comprehensive Analysis** - PostgreSQL 16.8 is the primary measured baseline (local 3/10/50 plus AWS RDS 3-worker replay), with PostgreSQL 18.2 retained as side-by-side comparison context; MySQL remains external estimate
+- **Version**: 2.12 (Clarified AWS remote replay as worst-case cross-region+VPN path; distinguished from production-like co-located benchmarking)
+- **Status**: ✅ **Comprehensive Analysis** - PostgreSQL 16.8 is the primary measured baseline (local 3/10/50 plus AWS RDS 3/10-worker replays), with PostgreSQL 18.2 retained as side-by-side comparison context; MySQL remains external estimate
 - **For Production Decision**: Run both databases in identical environments (local + AWS RDS) for final validation
 - **Related Documents**:
   - `CRM_POC_SPEC.md` - POC specification and design decisions
@@ -1209,11 +1269,21 @@ For MySQL documentation, we relied on:
   - `results/20260226_1608_w10b/summary.md` - PostgreSQL 16.8 corrected 10-worker run summary
   - `results/20260226_1608_w03b/summary.md` - PostgreSQL 16.8 corrected 3-worker run summary
   - `results/20260305_155121/summary.md` - PostgreSQL 16.8 AWS RDS 3-worker replay summary
+  - `results/20260305_161908/summary.md` - PostgreSQL 16.8 AWS RDS 10-worker replay summary
   - `results/20260220_081004/summary.md` - PostgreSQL 18.2 50-worker comparison run summary
   - `results/20260219_210347/summary.md` - 10-worker comparison run summary
   - `results/20260219_173511/summary.md` - 3-worker comparison run summary
 
 ## Change Log
+
+### v2.11 (2026-03-05)
+- ✅ Added measured PostgreSQL 16.8 AWS RDS run context for `20260305_161908` (10 workers) with pre/post phase totals and artifact references
+- ✅ Added explicit AWS RDS `3 -> 10` worker comparison table with derived throughput and per-worker efficiency metrics
+- ✅ Updated next-step and appendix/reference sections to include both AWS RDS replay runs (`3` and `10` workers)
+
+### v2.12 (2026-03-05)
+- ✅ Reframed completed AWS remote replays as worst-case client-path measurements (cross-region distance + VPN), not production-like latency benchmarks
+- ✅ Updated recommendation/phase/validation wording to require co-located runners for production-like AWS comparisons
 
 ### v2.10 (2026-03-05)
 - ✅ Added measured PostgreSQL 16.8 AWS RDS run context (`20260305_155121`) with pre/post phase totals and artifact references

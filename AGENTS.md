@@ -251,6 +251,14 @@ Rules for consistency in this repository only.
    - In performance and run-context docs, label environments by concrete platform/topology (for example `local Docker`, `AWS RDS server`) instead of org-role labels (for example `DBA environment`).
    - Keep wording consistent across section titles, tables, references, and changelog entries when this naming is updated.
 
+35. **Keep query timing boundaries mode-consistent for comparable metrics**
+   - When reporting/contrasting timings across iteration and load modes, include the same transaction boundary in both paths (commit included or excluded consistently).
+   - If a mode intentionally differs, document the timing boundary difference directly in output headers/summary text.
+
+36. **Fail fast on duplicate named-query labels across SQL catalogs**
+   - Treat duplicate `-- name:` labels in a single SQL file as configuration errors (raise an explicit error).
+   - When merging core/complex query dictionaries, reject overlapping names instead of allowing silent overwrite precedence.
+
 ### Section 3: Repository Constraints
 Hard boundaries for this repository.
 

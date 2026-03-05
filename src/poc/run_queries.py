@@ -39,6 +39,10 @@ def parse_named_queries(path: Path) -> dict[str, str]:
         line = raw_line.rstrip("\n")
         if line.strip().startswith("-- name:"):
             current_name = line.split(":", 1)[1].strip()
+            if current_name in queries:
+                raise ValueError(
+                    f"Duplicate query name in {path.name}: {current_name!r}"
+                )
             queries[current_name] = []
             continue
 
@@ -50,6 +54,19 @@ def parse_named_queries(path: Path) -> dict[str, str]:
         for name, lines in queries.items()
         if "".join(lines).strip()
     }
+
+
+def merge_query_catalogs(
+    core_queries: dict[str, str], complex_queries: dict[str, str]
+) -> dict[str, str]:
+    duplicates = sorted(set(core_queries).intersection(complex_queries))
+    if duplicates:
+        joined = ", ".join(repr(name) for name in duplicates)
+        raise ValueError(
+            "Duplicate query name(s) across core/complex catalogs: "
+            f"{joined}"
+        )
+    return {**core_queries, **complex_queries}
 
 
 def percentile(values: list[float], p: float) -> float:
@@ -256,6 +273,7 @@ def run_iterations(
                         params = params_for_query(name, ctx, i)
                         started = time.perf_counter()
                         result_rows, fetched_rows = execute_query(cur, query_str, params)
+                        conn.commit()
 
                         elapsed_ms = (time.perf_counter() - started) * 1000
                         by_query[name].append(elapsed_ms)
@@ -275,8 +293,6 @@ def run_iterations(
                             and len(fetched_rows[0]) >= 2
                         ):
                             ctx["properties_version"] = int(fetched_rows[0][1])
-
-                        conn.commit()
     finally:
         write_iteration_outputs(settings, phase, rows, by_query)
 
@@ -832,7 +848,7 @@ def main() -> None:
 
     core_queries = parse_named_queries(settings.sql_core)
     complex_queries = parse_named_queries(settings.sql_complex)
-    all_queries = {**core_queries, **complex_queries}
+    all_queries = merge_query_catalogs(core_queries, complex_queries)
 
     seed_limit = settings.load_seed_contexts if "load" in modes else 1
     with connect(settings, autocommit=False) as conn:
