@@ -231,6 +231,22 @@ Rules for consistency in this repository only.
    - When showing example CSV rows from generated datasets, explicitly state that rows are excerpts and include the total generated row counts for each shown table.
    - When relevant, distinguish generated row counts from additional static seed rows so readers can reconcile final table cardinality.
 
+30. **Keep schema-introspection SQL aligned with runtime schema context**
+   - For diagnostics queries (`pg_stat_user_tables`, `pg_stat_user_indexes`, TOAST/relnamespace joins), do not hardcode `public`; scope by `current_schema()` or explicit runtime schema selection.
+   - Apply the same schema-scoping rule to summary artifacts so non-`public` runs do not produce header-only metric files.
+
+31. **Use `psql` semantics for SQL catalogs that include utility commands**
+   - When executing SQL files that may include `VACUUM` or other non-transaction commands, run them via `psql -f` flow instead of single-driver `execute()` batching that can wrap statements in one transaction.
+   - If a Python path is required, split execution so utility commands run in standalone autocommit statements.
+
+32. **Keep synthetic recency fields bounded to present time when used for seed ordering**
+   - If workload seeding orders by recency fields (for example `updated_at DESC`), generation logic must not create future timestamps.
+   - Cap generated recency timestamps at generation-time `now` to avoid biased seed-context concentration.
+
+33. **Do not keep dead runtime knobs**
+   - Any environment setting parsed into `Settings` (for example `BLOAT_ROUNDS`) must be consumed by execution scripts/SQL in the same behavior path.
+   - If an env variable cannot be wired end-to-end, remove it from config/docs rather than leaving it silently ineffective.
+
 ### Section 3: Repository Constraints
 Hard boundaries for this repository.
 

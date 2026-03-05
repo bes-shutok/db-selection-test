@@ -19,7 +19,7 @@ services:
       -c max_parallel_workers_per_gather=${PG_MAX_PARALLEL_WORKERS_PER_GATHER:-1}
       -c jit=${PG_JIT:-off}
     volumes:
-      - pgdata:/var/lib/postgresql
+      - pgdata:/var/lib/postgresql/data
 
 volumes:
   pgdata:

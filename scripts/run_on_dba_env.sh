@@ -19,6 +19,7 @@ fi
 : "${DB_PASSWORD:?DB_PASSWORD is required}"
 export DB_SCHEMA="${DB_SCHEMA:-}"
 export DB_SESSION_ROLE="${DB_SESSION_ROLE:-}"
+export BLOAT_ROUNDS="${BLOAT_ROUNDS:-20}"
 export RUN_ID="${RUN_ID:-$(date -u +%Y%m%d_%H%M%S)}"
 export QUERY_RUN_PROFILE="${QUERY_RUN_PROFILE:-both}"
 
@@ -28,7 +29,15 @@ if ! command -v psql >/dev/null 2>&1; then
   exit 1
 fi
 
-PSQL_CMD=(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1)
+PSQL_CMD=(
+  psql
+  -h "$DB_HOST"
+  -p "$DB_PORT"
+  -U "$DB_USER"
+  -d "$DB_NAME"
+  -v ON_ERROR_STOP=1
+  -v BLOAT_ROUNDS="$BLOAT_ROUNDS"
+)
 export PGPASSWORD="$DB_PASSWORD"
 
 run_sql_file() {

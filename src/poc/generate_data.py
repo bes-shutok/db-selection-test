@@ -44,6 +44,8 @@ def generate_profiles(path: Path, profile_count: int) -> list[tuple[str, str]]:
 
     rows: list[tuple[str, str]] = []
 
+    now_utc = datetime.now(timezone.utc)
+
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow([
@@ -63,7 +65,10 @@ def generate_profiles(path: Path, profile_count: int) -> list[tuple[str, str]]:
             country = weighted_choice(countries, country_w)
             language = weighted_choice(languages, language_w)
             created_at = random_time(365)
-            updated_at = created_at + timedelta(days=RNG.randint(0, 180))
+            updated_at = min(
+                created_at + timedelta(days=RNG.randint(0, 180)),
+                now_utc,
+            )
 
             writer.writerow([
                 tenant_id,

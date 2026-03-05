@@ -19,6 +19,7 @@ export DB_USER="${DB_USER:-ups_user}"
 export DB_PASSWORD="${DB_PASSWORD:-ups_pass}"
 export DB_SCHEMA="${DB_SCHEMA:-}"
 export DB_SESSION_ROLE="${DB_SESSION_ROLE:-}"
+export BLOAT_ROUNDS="${BLOAT_ROUNDS:-20}"
 export RUN_ID="${RUN_ID:-$(date -u +%Y%m%d_%H%M%S)}"
 export QUERY_RUN_PROFILE="${QUERY_RUN_PROFILE:-both}"
 
@@ -32,7 +33,8 @@ run_sql_file() {
     {
       emit_session_bootstrap_sql
       cat "$sql_file_abs"
-    } | psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -f -
+    } | psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
+      -v ON_ERROR_STOP=1 -v BLOAT_ROUNDS="$BLOAT_ROUNDS" -f -
     return
   fi
 
@@ -41,7 +43,8 @@ run_sql_file() {
       emit_session_bootstrap_sql
       cat "$sql_file_abs"
     } | docker compose exec -T -e PGPASSWORD="$DB_PASSWORD" postgres \
-      psql -h localhost -p 5432 -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -f -
+      psql -h localhost -p 5432 -U "$DB_USER" -d "$DB_NAME" \
+      -v ON_ERROR_STOP=1 -v BLOAT_ROUNDS="$BLOAT_ROUNDS" -f -
     return
   fi
 

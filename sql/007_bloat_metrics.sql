@@ -16,7 +16,7 @@ SELECT
     last_analyze,
     last_autoanalyze
 FROM pg_stat_user_tables
-WHERE schemaname = 'public'
+WHERE schemaname = current_schema()
 ORDER BY n_dead_tup DESC;
 
 -- Index bloat and usage
@@ -29,7 +29,7 @@ SELECT
     idx_tup_read,
     idx_tup_fetch
 FROM pg_stat_user_indexes
-WHERE schemaname = 'public'
+WHERE schemaname = current_schema()
 ORDER BY pg_relation_size(indexrelid) DESC;
 
 -- TOAST table sizes (important for JSONB bloat)
@@ -41,7 +41,7 @@ SELECT
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 LEFT JOIN pg_class t ON t.oid = c.reltoastrelid
-WHERE n.nspname = 'public'
+WHERE n.nspname = current_schema()
   AND c.relkind = 'r'
   AND t.oid IS NOT NULL
 ORDER BY pg_total_relation_size(t.oid) DESC;
@@ -80,7 +80,7 @@ table_settings AS (
         END AS table_scale_factor
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'public' AND c.relkind = 'r'
+    WHERE n.nspname = current_schema() AND c.relkind = 'r'
 )
 SELECT 
     s.schemaname,
@@ -101,5 +101,5 @@ SELECT
 FROM pg_stat_user_tables s
 CROSS JOIN global_settings gs
 LEFT JOIN table_settings ts ON ts.schemaname = s.schemaname AND ts.relname = s.relname
-WHERE s.schemaname = 'public'
+WHERE s.schemaname = current_schema()
 ORDER BY s.relname;
