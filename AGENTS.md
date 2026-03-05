@@ -247,6 +247,10 @@ Rules for consistency in this repository only.
    - Any environment setting parsed into `Settings` (for example `BLOAT_ROUNDS`) must be consumed by execution scripts/SQL in the same behavior path.
    - If an env variable cannot be wired end-to-end, remove it from config/docs rather than leaving it silently ineffective.
 
+34. **Use infrastructure names in publication-facing environment comparisons**
+   - In performance and run-context docs, label environments by concrete platform/topology (for example `local Docker`, `AWS RDS server`) instead of org-role labels (for example `DBA environment`).
+   - Keep wording consistent across section titles, tables, references, and changelog entries when this naming is updated.
+
 ### Section 3: Repository Constraints
 Hard boundaries for this repository.
 
