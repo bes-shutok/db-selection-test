@@ -248,36 +248,37 @@ def run_iterations(
     by_query: dict[str, list[float]] = defaultdict(list)
     ctx = dict(base_ctx)
 
-    with connect(settings, autocommit=False) as conn:
-        with conn.cursor() as cur:
-            for name, query_str in queries.items():
-                for i in range(1, settings.query_iterations + 1):
-                    params = params_for_query(name, ctx, i)
-                    started = time.perf_counter()
-                    result_rows, fetched_rows = execute_query(cur, query_str, params)
+    try:
+        with connect(settings, autocommit=False) as conn:
+            with conn.cursor() as cur:
+                for name, query_str in queries.items():
+                    for i in range(1, settings.query_iterations + 1):
+                        params = params_for_query(name, ctx, i)
+                        started = time.perf_counter()
+                        result_rows, fetched_rows = execute_query(cur, query_str, params)
 
-                    elapsed_ms = (time.perf_counter() - started) * 1000
-                    by_query[name].append(elapsed_ms)
-                    rows.append(
-                        {
-                            "query_name": name,
-                            "query_type": query_kind(name),
-                            "iteration": i,
-                            "elapsed_ms": round(elapsed_ms, 3),
-                            "rows": result_rows,
-                        }
-                    )
+                        elapsed_ms = (time.perf_counter() - started) * 1000
+                        by_query[name].append(elapsed_ms)
+                        rows.append(
+                            {
+                                "query_name": name,
+                                "query_type": query_kind(name),
+                                "iteration": i,
+                                "elapsed_ms": round(elapsed_ms, 3),
+                                "rows": result_rows,
+                            }
+                        )
 
-                    if (
-                        name == "write_patch_properties"
-                        and fetched_rows
-                        and len(fetched_rows[0]) >= 2
-                    ):
-                        ctx["properties_version"] = int(fetched_rows[0][1])
+                        if (
+                            name == "write_patch_properties"
+                            and fetched_rows
+                            and len(fetched_rows[0]) >= 2
+                        ):
+                            ctx["properties_version"] = int(fetched_rows[0][1])
 
-                    conn.commit()
-
-    write_iteration_outputs(settings, phase, rows, by_query)
+                        conn.commit()
+    finally:
+        write_iteration_outputs(settings, phase, rows, by_query)
 
 
 def resolve_load_weights(settings: Settings, queries: dict[str, str]) -> dict[str, float]:

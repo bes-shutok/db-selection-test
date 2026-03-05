@@ -4,9 +4,9 @@ services:
     container_name: crm_poc_postgres
     shm_size: ${PG_SHM_SIZE:-1g}
     environment:
-      POSTGRES_USER: ups_user
-      POSTGRES_PASSWORD: ups_pass
-      POSTGRES_DB: ups_poc
+      POSTGRES_USER: ${DB_USER:-ups_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-ups_pass}
+      POSTGRES_DB: ${DB_NAME:-ups_poc}
     ports:
       - "5432:5432"
     command: >
