@@ -32,10 +32,14 @@ Workload set:
 - PostgreSQL baseline optimization notes: `docs/POSTGRES_BASELINE_OPTIMIZATIONS.md`
 
 ## Prerequisites
-1. Docker (for local PostgreSQL)
-2. Python `3.14.2`
-3. `uv` `0.10.0`
-4. `psql` client (optional for local mode, required for DBA mode)
+- Python `3.14.2`
+- `uv` `0.10.0`
+- `psql` client (required for DBA mode)
+- Docker (required only for local PostgreSQL)
+
+Choose your setup mode:
+- **Local mode**: Uses Docker to run PostgreSQL locally
+- **Remote mode**: Connects to an external database server (e.g., RDS, Cloud SQL, or any managed PostgreSQL)
 
 ## Pinned Versions
 - PostgreSQL image: `postgres:16.8`
@@ -47,43 +51,71 @@ Workload set:
 - `rich`: `14.3.2`
 - build backend (`hatchling`): `1.28.0`
 
-## Quick Start (Local)
+## Quick Start
+
+### Option 1: Local Mode (Docker PostgreSQL)
+
 1. Copy env file:
 ```bash
 cp .env.example .env
 ```
+
 2. Install dependencies:
 ```bash
 uv sync
 ```
-3. Start PostgreSQL:
+
+3. Start PostgreSQL in Docker:
 ```bash
 docker compose up -d
 ```
-4. Run full local flow:
+
+4. Run the full local workflow:
 ```bash
 ./scripts/run_local.sh
 ```
 
-## Run on DBA Infrastructure
-1. Set `.env` with DBA connection values (and optional session role/schema controls):
+### Option 2: Remote Mode (External DB Server)
+
+For running tests against a remote PostgreSQL instance (e.g., Amazon RDS, Google Cloud SQL, Azure Database, or any self-managed server):
+
+1. Copy and configure the env file with your remote database connection:
 ```bash
-DB_HOST=your-db-host.region.rds.amazonaws.com
-DB_PORT=5432
-DB_NAME=your_db_name
-DB_USER=your_db_user
-DB_PASSWORD=your_password
+cp .env.example .env
+```
+
+2. Edit `.env` with your remote database credentials:
+```bash
+# Remote database connection
+DB_HOST=your-db-host.region.rds.amazonaws.com  # or your DB endpoint
+DB_PORT=5432                                     # default PostgreSQL port
+DB_NAME=your_db_name                             # database name
+DB_USER=your_db_user                             # database user
+DB_PASSWORD=your_password                        # database password
+
+# Optional: Use a specific schema (for multi-tenant setups)
 DB_SCHEMA=your_schema_name
+
+# Optional: Run as a specific role (requires SET ROLE privilege)
 DB_SESSION_ROLE=your_role_name
 ```
-2. Execute:
+
+3. Install dependencies:
+```bash
+uv sync
+```
+
+4. Run against the remote database:
 ```bash
 ./scripts/run_on_dba_env.sh
 ```
 
-Notes:
-- `DB_SCHEMA` is optional; when set, scripts and Python runners execute with `SET search_path TO "<schema>", public`.
-- `DB_SESSION_ROLE` is optional; when set, scripts and Python runners execute with `SET ROLE "<role>"` for object ownership/permissions.
+**Important notes for remote mode:**
+- No Docker is required—the script connects directly to your remote database
+- Ensure your network allows outbound connections to the database host/port
+- The database user must have privileges to create tables, indexes, and schemas
+- For RDS/AWS: ensure security groups allow connections from your IP
+- For Cloud SQL: ensure connections are authorized (IAM or password-based)
 
 ## Query Run Profiles
 - `QUERY_RUN_PROFILE=iterations`: deterministic single-connection latency sampling (`timings*.csv`).
