@@ -7,3 +7,5 @@ results/*
 data/*
 !data/.gitkeep
 .idea/*
+.DS_Store
+.claude/settings.local.json
