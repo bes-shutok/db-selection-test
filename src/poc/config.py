@@ -153,7 +153,7 @@ def load_settings() -> Settings:
         query_iterations=_positive_int("QUERY_ITERATIONS", "10"),
         bloat_rounds=_positive_int("BLOAT_ROUNDS", "20"),
         query_run_profile=query_run_profile,
-        load_workers=_positive_int("LOAD_WORKERS", "4"),
+        load_workers=_positive_int("LOAD_WORKERS", "3"),
         load_duration_seconds=_positive_int("LOAD_DURATION_SECONDS", "120"),
         load_warmup_seconds=_non_negative_int("LOAD_WARMUP_SECONDS", "15"),
         load_seed_contexts=_positive_int("LOAD_SEED_CONTEXTS", "1000"),
