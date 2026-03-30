@@ -9,3 +9,6 @@ data/*
 .idea/*
 .DS_Store
 .claude/settings.local.json
+
+# ralphex progress logs
+.ralphex/progress/

@@ -235,9 +235,9 @@ Rules for consistency in this repository only.
    - For diagnostics queries (`pg_stat_user_tables`, `pg_stat_user_indexes`, TOAST/relnamespace joins), do not hardcode `public`; scope by `current_schema()` or explicit runtime schema selection.
    - Apply the same schema-scoping rule to summary artifacts so non-`public` runs do not produce header-only metric files.
 
-31. **Use `psql` semantics for SQL catalogs that include utility commands**
-   - When executing SQL files that may include `VACUUM` or other non-transaction commands, run them via `psql -f` flow instead of single-driver `execute()` batching that can wrap statements in one transaction.
-   - If a Python path is required, split execution so utility commands run in standalone autocommit statements.
+31. **Use the Python SQL runner for SQL catalogs that include utility commands**
+   - SQL catalog files are executed through `poc.sql_runner.run_sql_file`, which connects via `psycopg`, applies session bootstrap (`SET ROLE`, `SET search_path`), substitutes `:VARIABLE` placeholders, and splits SQL into individual statements routing utility commands (`VACUUM`, `REINDEX`, `CLUSTER`) through autocommit sessions.
+   - No `psql` binary is required; the Python runner preserves the same per-statement commit semantics as the former `psql -v ON_ERROR_STOP=1` flow.
 
 32. **Keep synthetic recency fields bounded to present time when used for seed ordering**
    - If workload seeding orders by recency fields (for example `updated_at DESC`), generation logic must not create future timestamps.

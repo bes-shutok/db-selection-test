@@ -22,6 +22,7 @@ This document explains why each major POC choice was made, so implementation and
 | D9 | Local Docker first, then DBA infra replay | Accepted | DBA confirmed |
 | D10 | Python + `uv` for generator/runner tooling | Accepted | CRM engineering |
 | D11 | Final pass/fail thresholds (p95/p99, CPU/memory) are DBA-owned | Open input required | DBA |
+| D12 | Replace `psql` binary dependency with Python SQL runner | Accepted | CRM engineering |
 
 ## 3. Rationale by Decision
 ### D1. Standalone sibling project
@@ -106,6 +107,16 @@ Reasoning:
 
 Current gap:
 - Explicit thresholds by query group (p95/p99) and resource criteria are pending DBA confirmation.
+
+### D12. Replace `psql` binary dependency with Python SQL runner
+Reasoning:
+- DBA environment hosts often lack the `psql` client binary, which was a hard prerequisite for `run_on_dba_env.sh`.
+- The Python stack (`psycopg`) already handles all other workload phases (data generation, query execution, report collection).
+- Session bootstrap (`SET ROLE`, `SET search_path`) and utility-statement routing (`VACUUM`, `REINDEX`, `CLUSTER` via autocommit) can be preserved without `psql`.
+- Eliminates the Docker fallback path in `run_local.sh`, simplifying both scripts to a single execution mechanism.
+
+Tradeoff:
+- The custom SQL statement splitter in `poc.sql_runner` handles dollar-quoting, single-quoted strings, and line comments but does not support `psql` meta-commands (`\copy`, `\set`, `\i`). This is acceptable because the project's SQL catalog files use only standard SQL.
 
 ## 4. Non-Goals (Explicit)
 1. Implementing full CRM service APIs.
