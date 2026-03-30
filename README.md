@@ -37,6 +37,12 @@ Workload set:
 - `psql` client (required for DBA mode)
 - Docker (required only for local PostgreSQL)
 
+If `uv` is not installed for your current user yet on Linux or macOS, install the pinned version with:
+```bash
+python3 -m pip install --user pipx
+python3 -m pipx install uv==0.10.0
+```
+
 Choose your setup mode:
 - **Local mode**: Uses Docker to run PostgreSQL locally
 - **Remote mode**: Connects to an external database server (e.g., RDS, Cloud SQL, or any managed PostgreSQL)
