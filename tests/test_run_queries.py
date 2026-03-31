@@ -295,6 +295,31 @@ class RunQueriesTests(unittest.TestCase):
         self.assertEqual(captured["qps_window_seconds"], 30.0)
         self.assertEqual(captured["actual_elapsed_seconds"], 50.0)
 
+    def test_build_pg_stat_reset_sql_prefers_schema_qualified_four_arg_signature(self):
+        sql_text = run_queries.build_pg_stat_reset_sql(
+            "extensions",
+            {4, 3, 0},
+        )
+
+        self.assertEqual(
+            sql_text,
+            'SELECT "extensions".pg_stat_statements_reset('
+            "0::oid, 0::oid, 0::bigint, false"
+            ")",
+        )
+
+    def test_build_pg_stat_reset_sql_returns_none_without_supported_signature(self):
+        self.assertIsNone(run_queries.build_pg_stat_reset_sql("public", {2, 1}))
+
+    def test_cleanup_sql_qualifies_pg_stat_reset_by_extension_schema(self):
+        cleanup_sql = (
+            Path(__file__).resolve().parents[1] / "sql" / "000_cleanup.sql"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("extnamespace", cleanup_sql)
+        self.assertIn("pronargs", cleanup_sql)
+        self.assertIn("pg_stat_statements_reset(0::oid, 0::oid, 0::bigint, false)", cleanup_sql)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -353,27 +353,104 @@ def resolve_load_weights(settings: Settings, queries: dict[str, str]) -> dict[st
     return weights
 
 
-def is_pg_stat_extension_available(cur) -> bool:
-    cur.execute(
-        "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')"
-    )
-    row = cur.fetchone()
-    return bool(row and row[0])
-
-
 def apply_pgstat_policy(settings: Settings, message: str) -> None:
     if settings.load_pgstat_policy == "hard_fail":
         raise RuntimeError(message)
     print(f"WARN: {message}")
 
 
+def quote_ident(identifier: str) -> str:
+    return '"' + identifier.replace('"', '""') + '"'
+
+
+def get_pg_stat_extension_schema(cur) -> str | None:
+    cur.execute(
+        """
+        SELECT n.nspname
+        FROM pg_extension e
+        JOIN pg_namespace n
+          ON n.oid = e.extnamespace
+        WHERE e.extname = 'pg_stat_statements'
+        """
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    return str(row[0])
+
+
+def build_pg_stat_reset_sql(
+    extension_schema: str, available_arities: set[int]
+) -> str | None:
+    qualified_name = f"{quote_ident(extension_schema)}.pg_stat_statements_reset"
+    if 4 in available_arities:
+        return (
+            f"SELECT {qualified_name}(0::oid, 0::oid, 0::bigint, false)"
+        )
+    if 3 in available_arities:
+        return f"SELECT {qualified_name}(0::oid, 0::oid, 0::bigint)"
+    if 0 in available_arities:
+        return f"SELECT {qualified_name}()"
+    return None
+
+
+def resolve_pg_stat_reset_sql(cur) -> str | None:
+    extension_schema = get_pg_stat_extension_schema(cur)
+    if extension_schema is None:
+        return None
+
+    cur.execute(
+        """
+        SELECT p.pronargs
+        FROM pg_proc p
+        JOIN pg_namespace n
+          ON n.oid = p.pronamespace
+        WHERE n.nspname = %s
+          AND p.proname = 'pg_stat_statements_reset'
+        """,
+        (extension_schema,),
+    )
+    return build_pg_stat_reset_sql(
+        extension_schema,
+        {int(row[0]) for row in cur.fetchall()},
+    )
+
+
+def resolve_pg_stat_statements_view(cur) -> str | None:
+    extension_schema = get_pg_stat_extension_schema(cur)
+    if extension_schema is None:
+        return None
+
+    cur.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM pg_class c
+            JOIN pg_namespace n
+              ON n.oid = c.relnamespace
+            WHERE n.nspname = %s
+              AND c.relname = 'pg_stat_statements'
+              AND c.relkind IN ('v', 'm')
+        )
+        """,
+        (extension_schema,),
+    )
+    row = cur.fetchone()
+    if not row or not row[0]:
+        return None
+    return f"{quote_ident(extension_schema)}.pg_stat_statements"
+
+
 def reset_pg_stat_statements(settings: Settings, phase: str) -> tuple[bool, str]:
     try:
         with connect(settings, autocommit=True) as conn:
             with conn.cursor() as cur:
-                if not is_pg_stat_extension_available(cur):
-                    return False, f"{phase}: pg_stat_statements extension is not installed"
-                cur.execute("SELECT pg_stat_statements_reset()")
+                reset_sql = resolve_pg_stat_reset_sql(cur)
+                if reset_sql is None:
+                    return False, (
+                        f"{phase}: pg_stat_statements reset function is unavailable"
+                    )
+                cur.execute(reset_sql)
                 return True, f"{phase}: pg_stat_statements_reset executed"
     except Exception as exc:  # pragma: no cover - depends on runtime DB setup
         return False, f"{phase}: pg_stat_statements reset failed: {exc}"
@@ -386,10 +463,11 @@ def capture_pg_stat_statements(settings: Settings, phase: str) -> tuple[bool, st
     try:
         with connect(settings, autocommit=True) as conn:
             with conn.cursor() as cur:
-                if not is_pg_stat_extension_available(cur):
-                    return False, f"{phase}: pg_stat_statements extension is not installed"
+                pg_stat_view = resolve_pg_stat_statements_view(cur)
+                if pg_stat_view is None:
+                    return False, f"{phase}: pg_stat_statements view is unavailable"
 
-                cur.execute("SELECT * FROM pg_stat_statements LIMIT 0")
+                cur.execute(f"SELECT * FROM {pg_stat_view} LIMIT 0")
                 available_columns = [column.name for column in cur.description or []]
                 if not available_columns:
                     return False, f"{phase}: pg_stat_statements has no visible columns"
@@ -441,10 +519,11 @@ def capture_pg_stat_statements(settings: Settings, phase: str) -> tuple[bool, st
                     )
 
                 stmt = sql.SQL(
-                    "SELECT {columns} FROM pg_stat_statements "
+                    "SELECT {columns} FROM {view_name} "
                     "ORDER BY {order_column} DESC LIMIT %s"
                 ).format(
                     columns=sql.SQL(", ").join(sql.Identifier(name) for name in selected_columns),
+                    view_name=sql.SQL(pg_stat_view),
                     order_column=sql.Identifier(order_column),
                 )
                 cur.execute(stmt, (settings.load_pgstat_topn,))
