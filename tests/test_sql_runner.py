@@ -24,6 +24,19 @@ class SqlRunnerTests(unittest.TestCase):
             self.assertIn("1..5 LOOP", result)
             self.assertNotIn(":BLOAT_ROUNDS", result)
 
+    def test_substitutes_psql_single_quoted_variable_as_sql_literal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sql_path = Path(tmp) / "bloat_literal.sql"
+            sql_path.write_text(
+                "SELECT set_config('poc.bloat_rounds', :'BLOAT_ROUNDS', false);\n",
+                encoding="utf-8",
+            )
+
+            result = sql_runner.load_and_substitute(sql_path, {"BLOAT_ROUNDS": "5"})
+
+            self.assertIn("set_config('poc.bloat_rounds', '5', false)", result)
+            self.assertNotIn(":'BLOAT_ROUNDS'", result)
+
     def test_connect_receives_settings_with_session_fields(self):
         captured_settings: list[object] = []
 

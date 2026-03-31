@@ -18,3 +18,7 @@
 3. **Keep shared docs free of sensitive infrastructure identifiers**
    - In publication-facing or shared repository docs, keep only sanitized infrastructure details such as generic platform labels and non-secret capacity facts.
    - Do not store internal hostnames, private service URLs, connection strings, usernames, passwords, tokens, or similarly sensitive infrastructure identifiers in tracked docs.
+
+4. **Preserve quoted `psql` variable semantics in the Python SQL runner**
+   - When SQL catalog execution is routed through `poc.sql_runner`, support both bare `:VAR` placeholders and quoted `:'VAR'` placeholders already used by repository SQL files.
+   - Treat `:'VAR'` as SQL string-literal substitution and verify compatibility with an end-to-end script smoke test, not only unit tests.

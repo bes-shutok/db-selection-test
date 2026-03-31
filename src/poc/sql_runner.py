@@ -12,14 +12,36 @@ from .config import Settings
 _UTILITY_RE = re.compile(r"^\s*(VACUUM|REINDEX|CLUSTER)\b", re.IGNORECASE)
 
 
-_VAR_RE = re.compile(r"(?<!:)(?<!\w):([a-zA-Z_]\w*)(?!\w)")
+_VAR_RE = re.compile(
+    r"(?<!:)(?<!\w):(?:(?P<sq>'(?P<sq_name>[a-zA-Z_]\w*)')|(?P<dq>\"(?P<dq_name>[a-zA-Z_]\w*)\")|(?P<bare>[a-zA-Z_]\w*))(?!\w)"
+)
 
 
 def load_and_substitute(sql_path: Path, variables: dict[str, str]) -> str:
     text = sql_path.read_text(encoding="utf-8")
 
     def _replace(match: re.Match[str]) -> str:
-        return variables.get(match.group(1), match.group(0))
+        bare_name = match.group("bare")
+        if bare_name is not None:
+            return variables.get(bare_name, match.group(0))
+
+        sq_name = match.group("sq_name")
+        if sq_name is not None:
+            value = variables.get(sq_name)
+            if value is None:
+                return match.group(0)
+            escaped = value.replace("'", "''")
+            return f"'{escaped}'"
+
+        dq_name = match.group("dq_name")
+        if dq_name is not None:
+            value = variables.get(dq_name)
+            if value is None:
+                return match.group(0)
+            escaped = value.replace('"', '""')
+            return f'"{escaped}"'
+
+        return match.group(0)
 
     return _VAR_RE.sub(_replace, text)
 

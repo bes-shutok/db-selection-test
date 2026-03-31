@@ -238,6 +238,7 @@ Rules for consistency in this repository only.
 31. **Use the Python SQL runner for SQL catalogs that include utility commands**
    - SQL catalog files are executed through `poc.sql_runner.run_sql_file`, which connects via `psycopg`, applies session bootstrap (`SET ROLE`, `SET search_path`), substitutes `:VARIABLE` placeholders, and splits SQL into individual statements routing utility commands (`VACUUM`, `REINDEX`, `CLUSTER`) through autocommit sessions.
    - No `psql` binary is required; the Python runner preserves the same per-statement commit semantics as the former `psql -v ON_ERROR_STOP=1` flow.
+   - See `docs/project-guidelines.md` #4 for quoted `psql` variable compatibility and smoke-test expectations.
 
 32. **Keep synthetic recency fields bounded to present time when used for seed ordering**
    - If workload seeding orders by recency fields (for example `updated_at DESC`), generation logic must not create future timestamps.
