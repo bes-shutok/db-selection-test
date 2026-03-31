@@ -1,7 +1,7 @@
 # Core Concepts
 - Local mode: validation flow executed from a developer machine, usually against local Docker PostgreSQL.
 - DBA mode: same workload flow executed from a client machine against DBA-provided PostgreSQL infrastructure.
-- Client-side `psql`: `psql` binary installed on the machine running the script, not on the remote DB server.
+- Python SQL runner (`poc.run_sql_file`): the canonical SQL execution path used by both run scripts. It connects via `psycopg`, applies session bootstrap statements (`SET ROLE`, `SET search_path`), substitutes `:BLOAT_ROUNDS` placeholders, splits SQL into individual statements, and routes utility statements (e.g. `VACUUM`, `REINDEX`, `CLUSTER`) through autocommit sessions. No `psql` binary is required on the machine running the scripts.
 
 ## 1. Purpose
 This document is the canonical reference for `scripts/run_local.sh` and `scripts/run_on_dba_env.sh` behavior.
@@ -13,9 +13,13 @@ Both scripts run the same logical sequence:
 3. data generation and load (`poc.generate_data`, `poc.load_data`)
 4. static seed (`sql/003_seed_static.sql`)
 5. pre-bloat query execution using `QUERY_RUN_PROFILE` (`iterations`, `load`, or `both`)
-6. bloat workload (`sql/006_bloat_workload.sql`)
-7. post-bloat query execution using `QUERY_RUN_PROFILE` (`iterations`, `load`, or `both`)
-8. summary (`poc.collect_report`)
+6. bloat metrics baseline (`sql/007_bloat_metrics.sql` → `bloat_metrics_pre.txt`)
+7. bloat workload (`sql/006_bloat_workload.sql`)
+8. bloat metrics post-bloat (`sql/007_bloat_metrics.sql` → `bloat_metrics_post.txt`)
+9. post-bloat query execution using `QUERY_RUN_PROFILE` (`iterations`, `load`, or `both`)
+10. summary (`poc.collect_report`)
+
+All SQL files in steps 1, 2, 4, 6, 7, and 8 are executed through the Python SQL runner (`poc.run_sql_file`), which handles variable substitution, session bootstrap, and utility-statement routing without requiring `psql`.
 
 ## 3. Key Differences
 1. Environment variables
@@ -30,15 +34,16 @@ Both scripts run the same logical sequence:
   - `SQL_COMPLEX_FILE` (default: `sql/005_queries_complex.sql`)
   - Relative override values are resolved from project root.
 
-2. SQL client behavior
-- `run_local.sh` uses local `psql` when available, otherwise falls back to `docker compose exec ... psql` if local postgres container is running.
-- `run_on_dba_env.sh` requires local `psql` and has no Docker fallback.
-- In both scripts, SQL files are executed with optional session bootstrap statements (`SET ROLE`, `SET search_path`) when the corresponding env vars are set.
+2. SQL execution path
+- Both scripts use the Python SQL runner (`poc.run_sql_file`) to execute SQL catalog files.
+- The runner connects via `psycopg` using the same `DB_*` environment variables as the rest of the Python workload modules.
+- Session bootstrap (`SET ROLE`, `SET search_path`) is applied by the runner when `DB_SESSION_ROLE` or `DB_SCHEMA` are set.
+- No `psql` binary is required on the client machine.
 
-3. Where `psql` runs
-- In DBA mode, `psql` runs on the machine invoking `./scripts/run_on_dba_env.sh`.
-- It connects over the network to the server defined by `DB_HOST`/`DB_PORT`.
-- No SSH hop is performed by the script.
+3. Where the SQL runner connects
+- In DBA mode, the Python SQL runner connects over the network to the server defined by `DB_HOST`/`DB_PORT`.
+- In local mode, it connects to `localhost` (or the `DB_HOST` default) using the same `psycopg` path.
+- No SSH hop is performed by either script.
 
 ## 4. Operational Guidance
 1. Use local mode for correctness and fast iteration.

@@ -26,7 +26,7 @@ Workload set:
 ## Documentation
 - Project operating guide: `AGENTS.md`
 - Full CRM context and POC spec: `docs/CRM_POC_SPEC.md`
-- Run mode behavior and `psql` execution location: `docs/scripts/RUN_MODES.md`
+- Run mode behavior and SQL execution path: `docs/scripts/RUN_MODES.md`
 - Decision rationale log: `docs/DECISION_RATIONALE.md`
 - Stakeholder communication log: `docs/COMMUNICATION_LOG.md`
 - PostgreSQL baseline optimization notes: `docs/POSTGRES_BASELINE_OPTIMIZATIONS.md`
@@ -34,8 +34,9 @@ Workload set:
 ## Prerequisites
 - Python `3.14.2`
 - `uv` `0.10.0`
-- `psql` client (required for DBA mode)
 - Docker (required only for local PostgreSQL)
+
+No `psql` binary is required. SQL catalog files are executed through the Python SQL runner (`poc.run_sql_file`), which connects via `psycopg`. A local PostgreSQL client is optional and only useful for ad-hoc manual queries outside the run scripts.
 
 If `uv` is not installed for your current user yet on Linux or macOS, install the pinned version with:
 ```bash
