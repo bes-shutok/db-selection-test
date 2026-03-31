@@ -18,17 +18,18 @@ TL;DR Verdict:
 - MySQL 8.4: ⚠️ Limited recommendation - excellent for pure OLTP, but struggles with complex JSON and analytical queries
 
 Primary baseline for this document:
-- PostgreSQL `16.8` measured local matrix (`20260226_1608_w03b`, `20260226_1608_w10b`, `20260226_1608_w50`)
+- PostgreSQL `16.8` measured local Docker matrix (`20260226_1608_w03b`, `20260226_1608_w10b`, `20260226_1608_w50`)
+- PostgreSQL `16.8` measured local-client-to-AWS-RDS path (`20260305_155121`, `20260305_161908`)
+- PostgreSQL `16.8` measured AWS-client-to-AWS-RDS path (`20260331_102001`, `20260331_104205`, `20260331_110246`)
 - PostgreSQL `18.2` kept as side-by-side comparison context
-- AWS RDS measured comparison (`20260305_155121` -> `20260305_161908`):
-  - remote access through VPN introduced substantial end-to-end delay; this is a worst-case client-path scenario (cross-region distance + VPN), not a production-like co-located benchmark
-  - throughput scaled from `15.144` to `24.764` avg QPS (`3` -> `10` workers), but per-worker efficiency dropped (`5.048` -> `2.476` QPS/worker), showing early saturation in this end-to-end test path (client location + VPN + database resources)
-  - latency detail at 10 workers (pre-bloat, local vs AWS):
-    - `core_profile_lookup` p95: `1.650 ms` vs `145.328 ms` (about `88x` higher in this remote VPN setup)
-    - `core_consent_lookup` p95: `1.579 ms` vs `147.326 ms` (about `93x` higher in this remote VPN setup)
-    - `complex_join_filter` p95: `1837.345 ms` vs `7289.919 ms` (about `4.0x` higher in this remote VPN setup)
-    - `complex_event_rollup` p95: `3067.337 ms` vs `21859.295 ms` (about `7.1x` higher in this remote VPN setup)
-  - compared with the local MacBook Pro M4 Docker runs, this remote-over-VPN setup delivered materially lower throughput and higher p95 latency for this workload intensity; this should not be interpreted as an AWS-intrinsic limit
+
+Key March 31 refresh findings:
+- Average mixed-load QPS by environment:
+  - local Docker: `66.695`, `171.117`, `162.702` avg QPS at `3`, `10`, `50` workers
+  - local client -> AWS RDS: `15.144`, `24.764` avg QPS at `3`, `10` workers
+  - AWS client -> AWS RDS: `5.763`, `6.700`, `4.767` avg QPS at `3`, `10`, `50` workers
+- At `10` workers, pre-bloat mixed-load `core_profile_lookup` p95 was `1.650 ms` (local Docker), `145.328 ms` (local client -> AWS RDS), and `30.794 ms` (AWS client -> AWS RDS).
+- Inference from the current evidence: moving the client into AWS removes most of the remote-path penalty for isolated lookups, but it does not remove the mixed-load throughput gap. The March 31 AWS-side end-to-end results also reflect a much weaker runner (`2` vCPU, `7.4 GiB` RAM) than the local MacBook M4 baseline (`24 GiB` RAM), so these environment tables must not be read as normalized database-only capacity.
 
 ---
 
@@ -50,12 +51,12 @@ Primary baseline for this document:
   - `results/20260226_1608_w10b/db_version.txt`
   - `results/20260226_1608_w50/db_version.txt`
 
-### PostgreSQL 16.8 AWS RDS Runs (Measured Slices)
-- Remote AWS RDS runs:
-  - `20260305_155121`: 3 workers, `load` profile, schema `crm`, session role `crm.readwrite`
-  - `20260305_161908`: 10 workers, `load` profile, schema `crm`, session role `crm.readwrite`
+### PostgreSQL 16.8 Local Client -> AWS RDS Runs
+- Remote-path runs from a local client into AWS RDS:
+  - `20260305_155121`: 3 workers, `load` profile
+  - `20260305_161908`: 10 workers, `load` profile
 - Scale: Baseline (`100k profiles`, `5M events`)
-- Environment: AWS RDS PostgreSQL 16.8 server (remote over VPN)
+- Environment: AWS RDS PostgreSQL 16.8 server reached over the remote client path (worst-case access-path comparison, not the AWS-side path)
 - Measured phase totals (`20260305_155121`, 3 workers):
   - pre-bloat: duration `91.812s`, calls `1438`, errors `0`, qps `15.662`
   - post-bloat: duration `90.729s`, calls `1327`, errors `0`, qps `14.626`
@@ -69,6 +70,47 @@ Primary baseline for this document:
   - `results/20260305_155121/load_phase_summary_post_bloat.csv`
   - `results/20260305_161908/load_phase_summary_pre_bloat.csv`
   - `results/20260305_161908/load_phase_summary_post_bloat.csv`
+
+### PostgreSQL 16.8 AWS Client -> AWS RDS Runs
+- AWS-side runs:
+  - `20260331_102001`: 3 workers
+  - `20260331_104205`: 10 workers
+  - `20260331_110246`: 50 workers
+- Scale: Baseline (`100k profiles`, `5M events`)
+- Environment: AWS-based client path into AWS RDS PostgreSQL 16.8
+- Workload shape:
+  - 15s warmup
+  - 120s target measured duration/phase
+  - same baseline dataset and query family as the local Docker matrix
+- Measured phase totals (`20260331_102001`, 3 workers):
+  - pre-bloat: duration `120.0s`, actual elapsed `121.612s`, calls `693`, errors `0`, qps `5.775`
+  - post-bloat: duration `120.0s`, actual elapsed `123.001s`, calls `690`, errors `0`, qps `5.750`
+- Measured phase totals (`20260331_104205`, 10 workers):
+  - pre-bloat: duration `120.0s`, actual elapsed `129.596s`, calls `820`, errors `0`, qps `6.833`
+  - post-bloat: duration `120.0s`, actual elapsed `131.310s`, calls `788`, errors `0`, qps `6.567`
+- Measured phase totals (`20260331_110246`, 50 workers):
+  - pre-bloat: duration `120.0s`, actual elapsed `171.277s`, calls `566`, errors `0`, qps `4.717`
+  - post-bloat: duration `120.0s`, actual elapsed `177.123s`, calls `578`, errors `0`, qps `4.817`
+- Artifacts:
+  - `results/20260331_102001/summary.md`
+  - `results/20260331_104205/summary.md`
+  - `results/20260331_110246/summary.md`
+  - `results/20260331_102001/load_phase_summary_pre_bloat.csv`
+  - `results/20260331_102001/load_phase_summary_post_bloat.csv`
+  - `results/20260331_104205/load_phase_summary_pre_bloat.csv`
+  - `results/20260331_104205/load_phase_summary_post_bloat.csv`
+  - `results/20260331_110246/load_phase_summary_pre_bloat.csv`
+  - `results/20260331_110246/load_phase_summary_post_bloat.csv`
+
+### Runner Hardware Context for Environment Comparisons
+- local Docker and local client -> AWS RDS path:
+  - driver machine: MacBook M4 with `24 GiB` RAM
+- AWS client -> AWS RDS path:
+  - driver machine: `2` CPU VM with `7.4 GiB` RAM
+  - CPU model reported by `lscpu`: `AMD EPYC 7571`
+  - topology reported by `lscpu`: `2` threads per core, `1` core per socket, `1` socket
+  - virtualization: KVM
+- This hardware asymmetry is material. The environment-comparison tables below are end-to-end workload observations, not a normalized CPU-for-CPU database benchmark.
 
 ### PostgreSQL 18.2 Results (Secondary Comparison Context)
 - Comparison matrix runs:
@@ -439,23 +481,32 @@ Source links for topology assumptions:
 - MySQL Group Replication single-primary mode: https://dev.mysql.com/doc/refman/8.4/en/group-replication-single-primary-mode.html
 - MySQL InnoDB Cluster read replicas: https://dev.mysql.com/doc/mysql-shell/8.4/en/mysql-shell-read-replicas.html
 
-### 5. PostgreSQL 16.8 Internal Comparison (3 -> 10 -> 50 Workers)
+### 5. PostgreSQL 16.8 Execution-Path Comparison
 
-Measured local runs used for trend:
-- `3` workers: `20260226_1608_w03b`
-- `10` workers: `20260226_1608_w10b`
-- `50` workers: `20260226_1608_w50`
+Comparison scope for this section:
+- local Docker matrix: `20260226_1608_w03b`, `20260226_1608_w10b`, `20260226_1608_w50`
+- local client -> AWS RDS matrix: `20260305_155121`, `20260305_161908`
+- AWS client -> AWS RDS matrix: `20260331_102001`, `20260331_104205`, `20260331_110246`
+- Three-way environment tables use load-phase artifacts because that evidence exists for all cited runs.
+- Isolated iteration timings are compared only where matching `timings_summary_*` artifacts exist; in practice that means local Docker and AWS client -> AWS RDS.
 
 Derived metric formulas:
 - `avg_qps = (pre_qps + post_qps) / 2`
 - `qps_per_worker = avg_qps / workers`
 - `avg_response_s = workers / avg_qps`
 
-| run_id | workers | avg_qps (derived) | qps_per_worker (derived) | avg_response_s (derived) | total_errors (pre+post) |
-|---|---:|---:|---:|---:|---:|
-| `20260226_1608_w03b` | 3 | 66.695 | 22.232 | 0.045 | 0 |
-| `20260226_1608_w10b` | 10 | 171.117 | 17.112 | 0.058 | 0 |
-| `20260226_1608_w50` | 50 | 162.702 | 3.254 | 0.307 | 1 |
+### 5.1 Local Docker Internal Scaling (3 -> 10 -> 50 Workers)
+
+Measured local runs used for trend:
+- `3` workers: `20260226_1608_w03b`
+- `10` workers: `20260226_1608_w10b`
+- `50` workers: `20260226_1608_w50`
+
+| run_id | reference | workers | avg_qps (derived) | qps_per_worker (derived) | avg_response_s (derived) | total_errors (pre+post) |
+|---|---|---:|---:|---:|---:|---:|
+| `20260226_1608_w03b` | `results/20260226_1608_w03b/summary.md` | 3 | 66.695 | 22.232 | 0.045 | 0 |
+| `20260226_1608_w10b` | `results/20260226_1608_w10b/summary.md` | 10 | 171.117 | 17.112 | 0.058 | 0 |
+| `20260226_1608_w50` | `results/20260226_1608_w50/summary.md` | 50 | 162.702 | 3.254 | 0.307 | 1 |
 
 Raw phase totals used for the derived table:
 
@@ -465,82 +516,76 @@ Raw phase totals used for the derived table:
 | `20260226_1608_w10b` | 10 | 91.636 | 15811 | 0 | 172.541 | 90.970 | 15437 | 0 | 169.693 |
 | `20260226_1608_w50` | 50 | 94.302 | 15497 | 1 | 164.334 | 95.077 | 15314 | 0 | 161.070 |
 
-Heavy-query tail trend under concurrency (pre-bloat load p99):
+Observed trend:
+- `3 -> 10` workers: strong scale-up (`66.695` to `171.117` avg QPS, about `+156.6%`).
+- `10 -> 50` workers: throughput plateau (`171.117` to `162.702` avg QPS, about `-4.9%`) under much higher concurrency.
+- High worker counts are contention-dominated in the local Docker baseline too, but the plateau starts much later than in the AWS-side runs.
 
-| run_id | workers | `complex_event_rollup` p99 | `complex_join_filter` p99 | `core_profile_lookup` p99 |
-|---|---:|---:|---:|---:|
-| `20260226_1608_w03b` | 3 | 2368.844 ms | 1481.585 ms | 0.879 ms |
-| `20260226_1608_w10b` | 10 | 3409.003 ms | 1992.258 ms | 2.177 ms |
-| `20260226_1608_w50` | 50 | 13986.018 ms | 10999.194 ms | 31.073 ms |
+### 5.2 Three-Condition Comparison at 3 Workers
+
+| environment | run_id | reference | pre qps | post qps | avg_qps (derived) | `core_profile_lookup` p95 | `core_consent_lookup` p95 | `complex_join_filter` p95 | `complex_event_rollup` p95 |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|
+| local Docker | `20260226_1608_w03b` | `results/20260226_1608_w03b/summary.md` | 67.611 | 65.779 | 66.695 | 0.771 ms | 0.721 ms | 1395.313 ms | 2362.340 ms |
+| local client -> AWS RDS | `20260305_155121` | `results/20260305_155121/summary.md` | 15.662 | 14.626 | 15.144 | 143.256 ms | 142.724 ms | 1730.575 ms | 3618.004 ms |
+| AWS client -> AWS RDS | `20260331_102001` | `results/20260331_102001/summary.md` | 5.775 | 5.750 | 5.763 | 26.295 ms | 22.570 ms | 4347.493 ms | 7273.986 ms |
+
+Environment-qualified interpretation:
+- Relative throughput vs local Docker: local client -> AWS RDS retained `22.7%` of local Docker avg QPS; AWS client -> AWS RDS retained `8.6%`.
+- The AWS-side path materially improved lookup p95 versus the remote local-client path (`26.295 ms` vs `143.256 ms` for `core_profile_lookup`), which is consistent with removing most of the remote round-trip penalty.
+- Heavy-query p95 moved in the opposite direction (`complex_event_rollup` `7273.986 ms` on AWS-side vs `3618.004 ms` on the local-client path). That indicates the end-to-end result is influenced by more than network distance alone; the weaker AWS-side runner is a plausible contributor and these figures should not be read as a pure RDS comparison.
+
+### 5.3 Three-Condition Comparison at 10 Workers
+
+| environment | run_id | reference | pre qps | post qps | avg_qps (derived) | `core_profile_lookup` p95 | `core_consent_lookup` p95 | `complex_join_filter` p95 | `complex_event_rollup` p95 |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|
+| local Docker | `20260226_1608_w10b` | `results/20260226_1608_w10b/summary.md` | 172.541 | 169.693 | 171.117 | 1.650 ms | 1.579 ms | 1837.345 ms | 3067.337 ms |
+| local client -> AWS RDS | `20260305_161908` | `results/20260305_161908/summary.md` | 24.096 | 25.433 | 24.764 | 145.328 ms | 147.326 ms | 7289.919 ms | 21859.295 ms |
+| AWS client -> AWS RDS | `20260331_104205` | `results/20260331_104205/summary.md` | 6.833 | 6.567 | 6.700 | 30.794 ms | 29.684 ms | 8562.871 ms | 30792.953 ms |
+
+Environment-qualified interpretation:
+- Relative throughput vs local Docker: local client -> AWS RDS retained `14.5%` of local Docker avg QPS; AWS client -> AWS RDS retained `3.9%`.
+- Relative throughput vs the remote local-client path: AWS client -> AWS RDS retained `27.1%` of the March 5 avg QPS while improving lookup p95 by about `4.7x` (`145.328 ms` -> `30.794 ms`) for `core_profile_lookup`.
+- Inference from the combined evidence: the March 31 AWS-side runs removed most of the network floor for point lookups, but the mixed workload still slowed dramatically on the heavier queries. Because the AWS-side runner is much weaker than the MacBook baseline, this section should be read as an end-to-end deployment-shape comparison, not a normalized database-only benchmark.
+
+### 5.4 Comparison at 50 Workers
+
+The document has curated `50`-worker evidence for local Docker and AWS client -> AWS RDS. A clearly labeled local-client -> AWS-RDS `50`-worker counterpart is not yet part of the published comparison set, so this table remains two-way.
+
+| environment | run_id | reference | pre qps | post qps | avg_qps (derived) | total_errors (pre+post) | `core_profile_lookup` p95 | `core_consent_lookup` p95 | `complex_join_filter` p95 | `complex_event_rollup` p95 |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| local Docker | `20260226_1608_w50` | `results/20260226_1608_w50/summary.md` | 164.334 | 161.070 | 162.702 | 1 | 22.298 ms | 21.848 ms | 9809.108 ms | 13518.266 ms |
+| AWS client -> AWS RDS | `20260331_110246` | `results/20260331_110246/summary.md` | 4.717 | 4.817 | 4.767 | 0 | 89.756 ms | 67.129 ms | 34420.438 ms | 105436.135 ms |
+
+Interpretation:
+- At `50` workers, the AWS-side path delivered only `2.9%` of the local Docker avg QPS.
+- The local Docker run had one optimistic-lock conflict across both phases; the AWS-side run had no errors, but its mixed-load throughput and heavy-query p95 were materially worse.
+- This is the clearest sign in the current corpus that the March 31 AWS-based test setup saturates much earlier than the local Docker baseline under the mixed workload; runner-size differences are a plausible contributor to that gap.
+
+### 5.5 AWS Client -> AWS RDS Internal Scaling (3 -> 10 -> 50 Workers)
+
+| run_id | reference | workers | avg_qps (derived) | qps_per_worker (derived) | avg_response_s (derived) | total_errors (pre+post) |
+|---|---|---:|---:|---:|---:|---:|
+| `20260331_102001` | `results/20260331_102001/summary.md` | 3 | 5.763 | 1.921 | 0.521 | 0 |
+| `20260331_104205` | `results/20260331_104205/summary.md` | 10 | 6.700 | 0.670 | 1.493 | 0 |
+| `20260331_110246` | `results/20260331_110246/summary.md` | 50 | 4.767 | 0.095 | 10.489 | 0 |
+
+Raw phase totals used for the derived table:
+
+| run_id | workers | pre duration (s) | pre actual elapsed (s) | pre calls | pre qps | post duration (s) | post actual elapsed (s) | post calls | post qps |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `20260331_102001` | 3 | 120.0 | 121.612 | 693 | 5.775 | 120.0 | 123.001 | 690 | 5.750 |
+| `20260331_104205` | 10 | 120.0 | 129.596 | 820 | 6.833 | 120.0 | 131.310 | 788 | 6.567 |
+| `20260331_110246` | 50 | 120.0 | 171.277 | 566 | 4.717 | 120.0 | 177.123 | 578 | 4.817 |
 
 Observed trend:
-- 3 -> 10 workers: strong scale-up (`66.695` to `171.117` QPS, about `+156.6%`).
-- 10 -> 50 workers: throughput plateau (`171.117` to `162.702` QPS, about `-4.9%`) under much higher concurrency.
-- Like 18.2, high worker counts are contention-dominated in local Docker conditions.
+- `3 -> 10` workers: only `+16.3%` avg QPS growth (`5.763` -> `6.700`) with per-worker efficiency dropping from `1.921` to `0.670`.
+- `10 -> 50` workers: avg QPS declined `28.9%` (`6.700` -> `4.767`) while `avg_response_s` worsened from `1.493s` to `10.489s`.
+- Compared with the local Docker baseline, AWS-side saturation appears much earlier and much more sharply, but this remains a comparison between different runner sizes rather than equal-capacity hardware.
 
-### 5.1 PostgreSQL 16.8 Local vs AWS RDS (Measured 3-Worker Run)
-
-Purpose:
-- Compare the same worker level (`3`) and load profile across local baseline and AWS RDS server environment.
-- Keep interpretation environment-qualified (trend comparability yes; absolute values no).
-
-Runs compared:
-- Local: `20260226_1608_w03b`
-- AWS RDS: `20260305_155121`
-
-Raw phase totals:
-
-| run_id | environment | workers | pre duration (s) | pre calls | pre errors | pre qps | post duration (s) | post calls | post errors | post qps |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `20260226_1608_w03b` | local Docker | 3 | 91.760 | 6204 | 0 | 67.611 | 90.622 | 5961 | 0 | 65.779 |
-| `20260305_155121` | AWS RDS server | 3 | 91.812 | 1438 | 0 | 15.662 | 90.729 | 1327 | 0 | 14.626 |
-
-Derived comparison:
-- Pre-bloat qps ratio (`remote/local`): `15.662 / 67.611 = 0.232`.
-- Post-bloat qps ratio (`remote/local`): `14.626 / 65.779 = 0.222`.
-- Bloat-phase direction is consistent (both lower post-bloat qps), while absolute throughput differs materially by environment.
-
-Interpretation:
-- The AWS RDS run confirms end-to-end replay viability (permissions, role usage, extension visibility, pre/post artifact generation).
-- Local and AWS RDS runs are comparable for workload-shape and directionality checks.
-- Absolute latency/qps values are not interchangeable between these environments because this replay used a remote client path (cross-region distance + VPN), not co-located runners.
-
-### 5.2 PostgreSQL 16.8 AWS RDS Comparison (3 -> 10 Workers)
-
-Purpose:
-- Compare measured remote AWS replay behavior from `3` workers to `10` workers for the same workload profile.
-
-Runs compared:
-- `20260305_155121` (3 workers)
-- `20260305_161908` (10 workers)
-
-Raw phase totals:
-
-| run_id | workers | pre duration (s) | pre calls | pre errors | pre qps | post duration (s) | post calls | post errors | post qps |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `20260305_155121` | 3 | 91.812 | 1438 | 0 | 15.662 | 90.729 | 1327 | 0 | 14.626 |
-| `20260305_161908` | 10 | 94.457 | 2276 | 0 | 24.096 | 94.719 | 2409 | 0 | 25.433 |
-
-Derived comparison:
-- Average qps (`(pre + post) / 2`): `15.144` -> `24.764` (`+63.5%`).
-- QPS per worker (`avg_qps / workers`): `5.048` -> `2.476` (`-51.0%` efficiency per worker).
-- Post-vs-pre phase direction:
-  - 3-worker run: `-6.6%` post-bloat qps change.
-  - 10-worker run: `+5.6%` post-bloat qps change.
-
-Selected pre-bloat p95 behavior (3 vs 10 workers):
-
-| Query | p95 at 3 workers | p95 at 10 workers | delta |
-|---|---:|---:|---:|
-| `core_profile_lookup` | 143.256 ms | 145.328 ms | +1.4% |
-| `core_consent_lookup` | 142.724 ms | 147.326 ms | +3.2% |
-| `complex_join_filter` | 1730.575 ms | 7289.919 ms | +321.3% |
-| `complex_event_rollup` | 3618.004 ms | 21859.295 ms | +504.1% |
-
-Interpretation:
-- Throughput increases from `3` to `10` workers in the remote AWS test, but not linearly.
-- Heavy analytical queries dominate tail-latency growth, while core lookup p95 remains near the remote network/round-trip floor.
-- Treat these remote latency levels as worst-case for this access pattern; co-located runner results are expected to be materially lower.
+Isolated pre-bloat timing context for local Docker vs AWS client -> AWS RDS:
+- `10` workers, `core_profile_lookup` iteration p95: `0.917 ms` (local Docker) vs `3.510 ms` (AWS-side).
+- `10` workers, `complex_event_rollup` iteration p95: `2427.040 ms` (local Docker) vs `2325.060 ms` (AWS-side).
+- These isolated timings are much closer than the mixed-load p95 values, which supports the interpretation that concurrency/resource pressure, not just single-query execution cost, is driving the March 31 load behavior.
 
 ### 6. PostgreSQL 16.8 vs PostgreSQL 18.2 (Local Matrix)
 
@@ -835,10 +880,10 @@ Practical implication for this POC:
 **Confidence**: **High** - POC results validate production readiness
 
 **⚠️ Important Caveat**: 
-- PostgreSQL results are from **local Docker** (baseline validation)
-- Current remote AWS replay (`20260305_155121`, `20260305_161908`) is a **worst-case path test** (cross-region + VPN), not a production-like latency baseline
-- For production decision, **must test on AWS RDS with co-located runners** (production-like hardware and minimized network-path bias)
-- Consider running **MySQL 8.4 POC** on same local environment for true apples-to-apples comparison
+- The PostgreSQL-vs-MySQL sections in this document still use **local Docker** as the primary measured PostgreSQL baseline.
+- The March 5 AWS RDS runs (`20260305_155121`, `20260305_161908`) remain a **worst-case remote client-path test**, not a production-like latency baseline.
+- The March 31 AWS-side runs (`20260331_102001`, `20260331_104205`, `20260331_110246`) remove most of the remote-path bias, but they also show that this AWS stack still saturates early under the mixed load.
+- For a final production decision, pair the existing PostgreSQL AWS-side evidence with **same-environment MySQL 8.4 runs** and DB-side CPU/IO/utilization capture.
 
 ---
 
@@ -912,11 +957,12 @@ Practical implication for this POC:
 ### Next Steps:
 1. ✅ **Run stretch scale** (`500k profiles`, `20M events`) - validates scaling characteristics (same local environment)
 2. ✅ **Bloat impact testing** - **COMPLETE**: Pre/post bloat measurements show excellent autovacuum effectiveness
-3. ✅ **AWS RDS environment testing** - **CRITICAL** for production decision (current replay is worst-case due to cross-region + VPN client path)
-   - PostgreSQL 16.8 remote replays complete for `3` and `10` workers (`20260305_155121`, `20260305_161908`) with pre/post bloat artifacts.
-   - Remaining: add `50`-worker/stress-level runs on AWS RDS with co-located runners and run same-environment MySQL for final apples-to-apples decision.
+3. ✅ **AWS RDS environment testing** - **CRITICAL** evidence now exists for both access paths
+   - Local client -> AWS RDS path complete for `3` and `10` workers (`20260305_155121`, `20260305_161908`) as worst-case remote-path evidence.
+   - AWS client -> AWS RDS path complete for `3`, `10`, and `50` workers (`20260331_102001`, `20260331_104205`, `20260331_110246`).
+   - Remaining: capture DB-side utilization for the March 31 stack and run same-environment MySQL for final apples-to-apples comparison.
 4. ⚠️ **MySQL 8.4 POC** (recommended): Run same workload on MySQL 8.4 in **identical local Docker environment** for true apples-to-apples comparison
-5. ⚠️ **Concurrent load stress testing**: High-concurrency local load profile (50 workers, low conflict rate, zero exception failures) is complete; next step is dedicated-server higher intensity (100+ connections, multi-tenant simulation) with larger memory/shared-memory headroom
+5. ⚠️ **Concurrent load stress testing**: High-concurrency local load profile (50 workers, low conflict rate, zero exception failures) is complete; next step is AWS-side higher intensity testing with explicit instance sizing and DB telemetry
 6. ✅ **Production pilot**: Start with low-risk service (e.g., Analytics Service read-only queries) after AWS RDS environment validation
 
 ### Recommended Testing Sequence for Authoritative Comparison
@@ -930,13 +976,14 @@ Practical implication for this POC:
   - Document hardware/config (same laptop, same Docker settings)
   - **Benefit**: Eliminates all environment variables, pure database comparison
 
-**Phase 2: AWS RDS Environment Testing (Worst-case remote first, then production-like)**
-- ✅ PostgreSQL 16.8 replay complete on AWS RDS for `3` and `10` workers (`20260305_155121`, `20260305_161908`)
+**Phase 2: AWS RDS Environment Testing (Remote path plus AWS-side path)**
+- ✅ PostgreSQL 16.8 remote-path replay complete on AWS RDS for `3` and `10` workers (`20260305_155121`, `20260305_161908`)
   - These completed runs are remote-over-VPN and should be interpreted as worst-case client-path measurements.
-- Expand PostgreSQL 16.8 matrix on AWS RDS (`50` and stress tier)
+- ✅ PostgreSQL 16.8 AWS-side replay complete on AWS RDS for `3`, `10`, and `50` workers (`20260331_102001`, `20260331_104205`, `20260331_110246`)
+- Expand the AWS-side matrix to stress-tier runs and collect CPU, memory, I/O, and storage latency from the DB side
 - Run MySQL 8.4 on AWS RDS (if Phase 1 shows promise)
 - Same hardware for both (e.g., AWS RDS r6g.4xlarge)
-- Use co-located runners in the same region/AZ as the DB to remove physical-distance + VPN bias from latency comparisons
+- Use AWS-side runners in the same region/AZ as the DB to remove physical-distance + VPN bias from latency comparisons
 - Same scale (baseline → stretch → stress)
 - Measure CPU, memory, I/O, network latency
 - **Benefit**: Production-representative results
@@ -960,15 +1007,21 @@ Practical implication for this POC:
 ### Run Summary (Primary Baseline + Comparison Levels)
 - **Primary run ID**: `20260226_1608_w50` (latest with bloat + load testing, 50 workers)
 - **Comparison run IDs**: `20260226_1608_w10b` (10 workers), `20260226_1608_w03b` (3 workers)
-- **AWS RDS replay run IDs**: `20260305_155121` (3 workers), `20260305_161908` (10 workers), load profile with schema `crm`
+- **Local client -> AWS RDS run IDs**: `20260305_155121` (3 workers), `20260305_161908` (10 workers), load profile with schema `crm`
+- **AWS client -> AWS RDS run IDs**: `20260331_102001` (3 workers), `20260331_104205` (10 workers), `20260331_110246` (50 workers)
 - **Scale**: Baseline (`100k profiles`, `900k consent rows`, `5M events`)
-- **Duration**: ~8 minutes (includes warmup + measured load phases for pre/post bloat)
+- **Duration**:
+  - local Docker matrix: about `8` minutes including warmup plus pre/post phases
+  - AWS client -> AWS RDS matrix: about `10-14` minutes depending on worker count because each phase targets `120s` and drains after the timed window
 - **Artifacts**:
   - `results/20260226_1608_w50/`
   - `results/20260226_1608_w10b/`
   - `results/20260226_1608_w03b/`
   - `results/20260305_155121/`
   - `results/20260305_161908/`
+  - `results/20260331_102001/`
+  - `results/20260331_104205/`
+  - `results/20260331_110246/`
 
 **✅ Bloat Testing Complete**: 
 - Pre-bloat query measurements: ✅
@@ -1046,11 +1099,16 @@ complex_join_filter:        p50=1277.866ms p95=1348.447ms p99=1378.660ms (10 ite
 
 ### Data Sources and Methodology
 
-**PostgreSQL 16.8 Results (Primary)**: Direct measurements from this POC (`run_id`: `20260226_1608_w03b`, `20260226_1608_w10b`, `20260226_1608_w50`, `20260305_155121`, `20260305_161908`)
-- Hardware: Local Docker environment
-- Configuration: POC local tuning (`shared_buffers=512MB`, `work_mem=16MB`, `jit=off`)
+**PostgreSQL 16.8 Results (Primary)**: Direct measurements from this POC (`run_id`: `20260226_1608_w03b`, `20260226_1608_w10b`, `20260226_1608_w50`, `20260305_155121`, `20260305_161908`, `20260331_102001`, `20260331_104205`, `20260331_110246`)
+- Environments:
+  - local Docker baseline for the PostgreSQL-vs-MySQL query tables
+  - local client -> AWS RDS path for worst-case remote-path comparison
+  - AWS client -> AWS RDS path for AWS-side comparison
+- Configuration:
+  - local Docker baseline uses the POC local tuning (`shared_buffers=512MB`, `work_mem=16MB`, `jit=off`)
+  - AWS RDS runs use the managed instance configuration present in the target environment and should be interpreted via their measured artifacts rather than assumed to match local tuning
 - Measurements: 10 iterations per query, p50/p95/p99 calculated
-- Artifacts: Available in `results/20260226_1608_w03b/`, `results/20260226_1608_w10b/`, `results/20260226_1608_w50/`, `results/20260305_155121/`, `results/20260305_161908/`
+- Artifacts: Available in `results/20260226_1608_w03b/`, `results/20260226_1608_w10b/`, `results/20260226_1608_w50/`, `results/20260305_155121/`, `results/20260305_161908/`, `results/20260331_102001/`, `results/20260331_104205/`, `results/20260331_110246/`
 
 **PostgreSQL 18.2 Results (Secondary Context)**: Side-by-side comparison runs in Section 6 (`20260219_173511`, `20260219_210347`, `20260220_081004`)
 
@@ -1173,8 +1231,11 @@ The latest POC run includes comprehensive bloat testing that validates PostgreSQ
      - `results/20260226_1608_w03b/` (16.8, 3 workers)
      - `results/20260226_1608_w10b/` (16.8, 10 workers)
      - `results/20260226_1608_w50/` (16.8, 50 workers)
-     - `results/20260305_155121/` (16.8, AWS RDS server, 3 workers)
-     - `results/20260305_161908/` (16.8, AWS RDS server, 10 workers)
+     - `results/20260305_155121/` (16.8, local client -> AWS RDS, 3 workers)
+     - `results/20260305_161908/` (16.8, local client -> AWS RDS, 10 workers)
+     - `results/20260331_102001/` (16.8, AWS client -> AWS RDS, 3 workers)
+     - `results/20260331_104205/` (16.8, AWS client -> AWS RDS, 10 workers)
+     - `results/20260331_110246/` (16.8, AWS client -> AWS RDS, 50 workers)
      - `results/20260219_173511/` (3 workers)
      - `results/20260219_210347/` (10 workers)
      - `results/20260220_081004/` (50 workers)
@@ -1183,9 +1244,10 @@ The latest POC run includes comprehensive bloat testing that validates PostgreSQ
      - 2026-02-20 (`20260220_081004`)
      - 2026-02-26 (`20260226_1608_w03b`, `20260226_1608_w10b`, `20260226_1608_w50`)
      - 2026-03-05 (`20260305_155121`, `20260305_161908`)
+     - 2026-03-31 (`20260331_102001`, `20260331_104205`, `20260331_110246`)
    - Dataset: 100k profiles, 5M events (baseline scale)
    - Includes both iteration and load artifacts (`timings_*`, `load_*`, `pg_stat_statements_*`)
-   - Load phase summaries used in the 3/10/50 worker comparison:
+   - Load phase summaries used in the local Docker and PG18 concurrency comparisons:
      - `results/20260226_1608_w03b/load_phase_summary_pre_bloat.csv`
      - `results/20260226_1608_w03b/load_phase_summary_post_bloat.csv`
      - `results/20260226_1608_w10b/load_phase_summary_pre_bloat.csv`
@@ -1198,18 +1260,36 @@ The latest POC run includes comprehensive bloat testing that validates PostgreSQ
      - `results/20260219_210347/load_phase_summary_post_bloat.csv`
      - `results/20260220_081004/load_phase_summary_pre_bloat.csv`
      - `results/20260220_081004/load_phase_summary_post_bloat.csv`
-   - Local-vs-AWS-RDS 3-worker comparison sources:
+   - Local client -> AWS RDS comparison sources:
      - `results/20260305_155121/load_phase_summary_pre_bloat.csv`
      - `results/20260305_155121/load_phase_summary_post_bloat.csv`
      - `results/20260305_155121/load_summary_pre_bloat.csv`
      - `results/20260305_155121/load_summary_post_bloat.csv`
      - `results/20260305_155121/summary.md`
-   - AWS-RDS 3-vs-10 worker comparison sources:
      - `results/20260305_161908/load_phase_summary_pre_bloat.csv`
      - `results/20260305_161908/load_phase_summary_post_bloat.csv`
      - `results/20260305_161908/load_summary_pre_bloat.csv`
      - `results/20260305_161908/load_summary_post_bloat.csv`
      - `results/20260305_161908/summary.md`
+   - AWS client -> AWS RDS comparison sources:
+     - `results/20260331_102001/load_phase_summary_pre_bloat.csv`
+     - `results/20260331_102001/load_phase_summary_post_bloat.csv`
+     - `results/20260331_102001/load_summary_pre_bloat.csv`
+     - `results/20260331_102001/load_summary_post_bloat.csv`
+     - `results/20260331_102001/timings_summary_pre_bloat.csv`
+     - `results/20260331_102001/summary.md`
+     - `results/20260331_104205/load_phase_summary_pre_bloat.csv`
+     - `results/20260331_104205/load_phase_summary_post_bloat.csv`
+     - `results/20260331_104205/load_summary_pre_bloat.csv`
+     - `results/20260331_104205/load_summary_post_bloat.csv`
+     - `results/20260331_104205/timings_summary_pre_bloat.csv`
+     - `results/20260331_104205/summary.md`
+     - `results/20260331_110246/load_phase_summary_pre_bloat.csv`
+     - `results/20260331_110246/load_phase_summary_post_bloat.csv`
+     - `results/20260331_110246/load_summary_pre_bloat.csv`
+     - `results/20260331_110246/load_summary_post_bloat.csv`
+     - `results/20260331_110246/timings_summary_pre_bloat.csv`
+     - `results/20260331_110246/summary.md`
    - Per-query pre-bloat p99 sources used in heavy-query trend:
      - `results/20260226_1608_w03b/load_summary_pre_bloat.csv`
      - `results/20260226_1608_w10b/load_summary_pre_bloat.csv`
@@ -1244,7 +1324,7 @@ The latest POC run includes comprehensive bloat testing that validates PostgreSQ
 
 ### Verification
 
-All URLs were checked in the current session on 2026-03-05:
+All URLs were last checked in a repository verification pass on 2026-03-05:
 - ⚠️ Percona blog pages: `https://www.percona.com/blog/` and `https://www.percona.com/blog/mysql-january-2026-performance-review/` returned HTTP 403 challenge in CLI checks
 - ✅ MySQL official docs: https://dev.mysql.com/ (accessible)
 - ✅ PostgreSQL docs: https://www.postgresql.org/ (accessible)
@@ -1258,9 +1338,9 @@ For MySQL documentation, we relied on:
 
 ## Document Metadata
 - **Author**: OpenCode AI Assistant
-- **Date**: 2026-03-05
-- **Version**: 2.12 (Clarified AWS remote replay as worst-case cross-region+VPN path; distinguished from production-like co-located benchmarking)
-- **Status**: ✅ **Comprehensive Analysis** - PostgreSQL 16.8 is the primary measured baseline (local 3/10/50 plus AWS RDS 3/10-worker replays), with PostgreSQL 18.2 retained as side-by-side comparison context; MySQL remains external estimate
+- **Date**: 2026-03-31
+- **Version**: 2.13 (Added AWS client -> AWS RDS `3/10/50` comparison and refactored the PostgreSQL 16.8 environment matrix into local Docker vs local client -> AWS RDS vs AWS client -> AWS RDS)
+- **Status**: ✅ **Comprehensive Analysis** - PostgreSQL 16.8 is the primary measured baseline (local Docker `3/10/50`, local client -> AWS RDS `3/10`, AWS client -> AWS RDS `3/10/50`), with PostgreSQL 18.2 retained as side-by-side comparison context; MySQL remains external estimate
 - **For Production Decision**: Run both databases in identical environments (local + AWS RDS) for final validation
 - **Related Documents**:
   - `CRM_POC_SPEC.md` - POC specification and design decisions
@@ -1268,13 +1348,21 @@ For MySQL documentation, we relied on:
   - `results/20260226_1608_w50/summary.md` - PostgreSQL 16.8 latest 50-worker run summary
   - `results/20260226_1608_w10b/summary.md` - PostgreSQL 16.8 corrected 10-worker run summary
   - `results/20260226_1608_w03b/summary.md` - PostgreSQL 16.8 corrected 3-worker run summary
-  - `results/20260305_155121/summary.md` - PostgreSQL 16.8 AWS RDS 3-worker replay summary
-  - `results/20260305_161908/summary.md` - PostgreSQL 16.8 AWS RDS 10-worker replay summary
+  - `results/20260305_155121/summary.md` - PostgreSQL 16.8 local client -> AWS RDS 3-worker summary
+  - `results/20260305_161908/summary.md` - PostgreSQL 16.8 local client -> AWS RDS 10-worker summary
+  - `results/20260331_102001/summary.md` - PostgreSQL 16.8 AWS client -> AWS RDS 3-worker summary
+  - `results/20260331_104205/summary.md` - PostgreSQL 16.8 AWS client -> AWS RDS 10-worker summary
+  - `results/20260331_110246/summary.md` - PostgreSQL 16.8 AWS client -> AWS RDS 50-worker summary
   - `results/20260220_081004/summary.md` - PostgreSQL 18.2 50-worker comparison run summary
   - `results/20260219_210347/summary.md` - 10-worker comparison run summary
   - `results/20260219_173511/summary.md` - 3-worker comparison run summary
 
 ## Change Log
+
+### v2.13 (2026-03-31)
+- ✅ Added PostgreSQL 16.8 AWS client -> AWS RDS run context for `20260331_102001`, `20260331_104205`, and `20260331_110246`
+- ✅ Reworked the PostgreSQL 16.8 environment comparison into a three-condition matrix: local Docker, local client -> AWS RDS, and AWS client -> AWS RDS
+- ✅ Updated recommendations, appendix, and source listings to reflect that AWS-side PostgreSQL evidence now exists and that same-environment MySQL plus DB telemetry are the remaining comparison gaps
 
 ### v2.11 (2026-03-05)
 - ✅ Added measured PostgreSQL 16.8 AWS RDS run context for `20260305_161908` (10 workers) with pre/post phase totals and artifact references
