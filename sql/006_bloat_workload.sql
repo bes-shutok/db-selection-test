@@ -2,11 +2,13 @@
 -- Primary focus: profile_properties. Secondary focus: consent.
 -- consumed env var: BLOAT_ROUNDS (passed by run scripts as psql variable)
 
+SELECT set_config('poc.bloat_rounds', :'BLOAT_ROUNDS', false);
+
 DO $$
 DECLARE
   i INTEGER;
 BEGIN
-  FOR i IN 1..:BLOAT_ROUNDS LOOP
+  FOR i IN 1..current_setting('poc.bloat_rounds')::integer LOOP
     UPDATE profile_properties
     SET custom_properties = jsonb_set(
           custom_properties,

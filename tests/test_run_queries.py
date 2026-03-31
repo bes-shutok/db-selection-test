@@ -320,6 +320,15 @@ class RunQueriesTests(unittest.TestCase):
         self.assertIn("pronargs", cleanup_sql)
         self.assertIn("pg_stat_statements_reset(0::oid, 0::oid, 0::bigint, false)", cleanup_sql)
 
+    def test_bloat_workload_sql_sets_bloat_rounds_outside_do_body(self):
+        bloat_sql = (
+            Path(__file__).resolve().parents[1] / "sql" / "006_bloat_workload.sql"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("set_config('poc.bloat_rounds', :'BLOAT_ROUNDS', false)", bloat_sql)
+        self.assertIn("current_setting('poc.bloat_rounds')::integer", bloat_sql)
+        self.assertNotIn("1..:BLOAT_ROUNDS", bloat_sql)
+
 
 if __name__ == "__main__":
     unittest.main()
